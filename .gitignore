@@ -1,0 +1,14 @@
+# Datos del negocio (base de datos SQL, respaldos): nunca se suben
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.migrado-a-sql.json
+
+# Archivos del sistema
+node_modules/
+*.tmp
+*.log
+Thumbs.db
+desktop.ini
+.DS_Store
