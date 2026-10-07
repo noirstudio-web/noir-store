@@ -73,6 +73,7 @@ const App = {
     const uidSaved = sessionStorage.getItem('noir-user');
     this.user = DB.data.users.find(u => u.id === uidSaved && u.active) || null;
     $('#boot').remove();
+    Updates.init();
     NumMask.init();
     window.addEventListener('hashchange', () => this.route());
     document.addEventListener('keydown', e => {
@@ -226,7 +227,7 @@ const App = {
     tick(); clearInterval(this._clock); this._clock = setInterval(tick, 20000);
     this.route();
     if (!DB.data.settings.setupDone && isAdmin()) setupWizard();
-    else LIC.warnSoon();
+    else { LIC.warnSoon(); Updates.changed(); }
   },
   navHTML() {
     let html = '', pendingSection = null;

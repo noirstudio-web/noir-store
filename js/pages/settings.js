@@ -106,7 +106,7 @@ Pages.settings = {
   tab: 'company',
   render(el) {
     const s = D.s;
-    const tabs = [['company', 'Empresa'], ['sales', 'Ventas e impuestos'], ['docs', 'Documentos'], ['loyalty', 'Puntos y apartados'], ['whatsapp', 'WhatsApp'], ['account', 'Mi cuenta'], ['users', 'Usuarios'], ['license', 'Suscripción'], ['catalogs', 'Catálogos'], ['backup', 'Respaldo y datos'], ['legal', 'Términos y privacidad'], ['sql', 'Base de datos SQL'], ['audit', 'Bitácora']];
+    const tabs = [['company', 'Empresa'], ['sales', 'Ventas e impuestos'], ['docs', 'Documentos'], ['loyalty', 'Puntos y apartados'], ['whatsapp', 'WhatsApp'], ['account', 'Mi cuenta'], ['users', 'Usuarios'], ['license', 'Suscripción'], ['catalogs', 'Catálogos'], ['backup', 'Respaldo y datos'], ['legal', 'Términos y privacidad'], ...(Updates.available() ? [['updates', 'Actualizaciones']] : []), ['sql', 'Base de datos SQL'], ['audit', 'Bitácora']];
     el.innerHTML = `<div class="tabs">${tabs.map(([k, l]) => `<button class="tab ${this.tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div><div id="body"></div>`;
     $$('[data-tab]', el).forEach(b => b.onclick = () => { this.tab = b.dataset.tab; this.render(el); });
     const body = $('#body', el);
@@ -361,6 +361,16 @@ Pages.settings = {
           else { reload(); App.licPill(); }
         } catch (e) { toast(e.message, 'err', 6000); }
       };
+    }
+
+    else if (this.tab === 'updates') {
+      body.innerHTML = `<div class="card card-pad" style="max-width:640px">
+        <h3 style="margin:0 0 6px;font:600 15px var(--display)">${icon('download', 17)} Actualizaciones del programa</h3>
+        <p class="muted small" style="margin-top:0">Versión instalada: <b>${esc(Updates.version || '—')}</b>. Las actualizaciones se descargan solas y se instalan al cerrar el programa. Tus datos no se borran.</p>
+        <div id="upd-box">${Updates.statusHtml()}</div>
+        <div class="row mt"><button class="btn" id="upd-check">${icon('search', 15)} Buscar actualizaciones</button><button class="btn primary" id="upd-install">${icon('download', 15)} Reiniciar y actualizar</button></div></div>`;
+      $('#upd-check', body).onclick = () => Updates.check();
+      $('#upd-install', body).onclick = () => Updates.installNow();
     }
 
     else if (this.tab === 'legal') {
