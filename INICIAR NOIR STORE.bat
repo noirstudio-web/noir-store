@@ -4,8 +4,8 @@ title NOIR STORE
 cd /d "%~dp0"
 where node >nul 2>nul
 if %errorlevel%==0 (
-  start "" "http://localhost:8080"
   node server.js
+  pause
 ) else (
   echo.
   echo   Node.js no esta instalado: se abrira el sistema en modo navegador.

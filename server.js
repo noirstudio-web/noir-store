@@ -11,7 +11,8 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const PORT = +process.env.PORT || 8080;
+const START_PORT = +process.env.PORT || 8080;
+let PORT = START_PORT;
 const ROOT = __dirname;
 const DATA = path.join(ROOT, 'data');
 const DB_FILE = path.join(DATA, 'noir-db.json');
@@ -159,6 +160,8 @@ const server = http.createServer((req, res) => {
     } catch (e) { send(res, 500, JSON.stringify({ error: e.message })); }
     return;
   }
+  /* Identifica esta instalación (para no abrir la tienda equivocada si hay varias en el mismo equipo) */
+  if (url === '/api/whoami') { const d = readDb(); return send(res, 200, JSON.stringify({ app: 'NOIR STORE', root: ROOT, company: d?.settings?.company?.name || '' })); }
   if (url === '/api/rev') { const d = readDb(); return send(res, 200, JSON.stringify({ rev: d && d.meta ? d.meta.rev || 0 : 0 })); }
 
   // archivos estáticos
@@ -171,15 +174,44 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  const ips = Object.values(os.networkInterfaces()).flat().filter(i => i && i.family === 'IPv4' && !i.internal).map(i => i.address);
-  console.log('\n  ✦ NOIR STORE en funcionamiento ✦\n');
-  console.log(`  En esta computadora:   http://localhost:${PORT}`);
-  ips.forEach(ip => console.log(`  En otras de la red:    http://${ip}:${PORT}`));
-  console.log(`\n  Base de datos:         ${sql ? SQL_FILE + ' (SQL · ' + sql.info().engine + ')' : DB_FILE + ' (JSON)'}`);
-  console.log('  No cierres esta ventana mientras uses el sistema.\n');
-});
-server.on('error', e => {
-  if (e.code === 'EADDRINUSE') console.log(`\n  El puerto ${PORT} ya está en uso (¿el sistema ya está abierto?). Abre http://localhost:${PORT}\n`);
-  else console.error(e);
-});
+/* Abre el navegador en la dirección correcta */
+function openBrowser(url) {
+  if (process.env.NOIR_NO_OPEN) return;
+  const { exec } = require('child_process');
+  exec(process.platform === 'win32' ? `start "" "${url}"` : process.platform === 'darwin' ? `open "${url}"` : `xdg-open "${url}"`);
+}
+/* Si el puerto está ocupado por OTRA tienda NOIR STORE (u otro programa), usa el siguiente libre */
+function listen(port) {
+  const onListening = () => {
+    server.removeListener('error', onError);
+    PORT = port;
+    const ips = Object.values(os.networkInterfaces()).flat().filter(i => i && i.family === 'IPv4' && !i.internal).map(i => i.address);
+    const company = readDb()?.settings?.company?.name;
+    console.log('\n  ✦ NOIR STORE en funcionamiento ✦' + (company ? '  ·  ' + company : '') + '\n');
+    console.log(`  En esta computadora:   http://localhost:${PORT}`);
+    ips.forEach(ip => console.log(`  En otras de la red:    http://${ip}:${PORT}`));
+    console.log(`\n  Base de datos:         ${sql ? SQL_FILE + ' (SQL · ' + sql.info().engine + ')' : DB_FILE + ' (JSON)'}`);
+    console.log('  No cierres esta ventana mientras uses el sistema.\n');
+    openBrowser(`http://localhost:${PORT}`);
+  };
+  const onError = async e => {
+    server.removeListener('listening', onListening);
+    if (e.code !== 'EADDRINUSE') { console.error(e); return; }
+    try {
+      const j = await (await fetch(`http://127.0.0.1:${port}/api/whoami`, { signal: AbortSignal.timeout(2000) })).json();
+      if (j.root === ROOT) {
+        console.log(`\n  Este sistema ya está abierto en http://localhost:${port}\n`);
+        openBrowser(`http://localhost:${port}`);
+        setTimeout(() => process.exit(0), 500);
+        return;
+      }
+      console.log(`  El puerto ${port} lo usa otra tienda NOIR STORE (${j.company || 'otra carpeta'}). Probando el ${port + 1}…`);
+    } catch (err) { console.log(`  El puerto ${port} está ocupado por otro programa. Probando el ${port + 1}…`); }
+    if (port - START_PORT >= 30) { console.log('\n  No hay puertos libres entre ' + START_PORT + ' y ' + port + '. Cierra otros sistemas e intenta de nuevo.\n'); return; }
+    listen(port + 1);
+  };
+  server.once('error', onError);
+  server.once('listening', onListening);
+  server.listen(port, '0.0.0.0');
+}
+listen(START_PORT);
