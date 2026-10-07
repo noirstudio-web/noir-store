@@ -319,7 +319,7 @@ function ownerScreen(onDone) {
     if (p1.length < 4) return toast('La contraseña debe tener al menos 4 caracteres', 'warn');
     if (p1 !== p2) return toast('Las contraseñas no coinciden', 'warn');
     const d = DB.data, admin = d.users.find(u => u.username === 'admin' && checkPassword(u, '1234'));
-    admin.username = user; if (name) admin.name = name; setPassword(admin, p1);
+    admin.username = user; if (name) admin.name = name; setPassword(admin, p1); clearPin(admin);   // sin el PIN 1234 de fábrica
     s.company.name = biz; LIC.payload.n = biz; d.meta.ownerSet = true;
     audit('Acceso del dueño creado', `Usuario ${user}`);
     DB.commit(); await DB.persist();
@@ -337,13 +337,13 @@ function setupWizard() {
     body: `<p class="muted" style="margin-top:0">Configura los datos básicos de tu negocio. Podrás cambiarlos luego en Configuración.</p>
       <div class="form-grid">
         <div class="field span-2"><label>Nombre del negocio</label><input name="name" value="${esc(s.company.name)}"></div>
-        <div class="field span-2"><label>País (moneda e impuesto)</label><select name="country">${Object.entries(COUNTRY_PRESETS).map(([k, v]) => opt(k, `${v.name} — ${v.currencySymbol} · ${v.taxName} ${v.taxRate}%`, s.country || 'DO')).join('')}</select></div>
+        <div class="field span-2"><label>País (moneda e impuesto)</label><select name="country">${Object.entries(COUNTRY_PRESETS).map(([k, v]) => opt(k, `${v.name} — ${v.currencySymbol} · ${v.taxName} ${v.taxRate}%`, s.country || 'CO')).join('')}</select></div>
         <div class="field"><label>Símbolo de moneda</label><input name="currencySymbol" value="${esc(s.currencySymbol)}"></div>
         <div class="field"><label>Impuesto</label><div class="input-group"><input name="taxName" value="${esc(s.taxName)}" style="flex:1.4"><input name="taxRate" type="number" step="0.01" value="${s.taxRate}" style="flex:1"></div></div>
         <div class="field span-2"><label class="check"><input type="checkbox" name="pricesIncludeTax" ${s.pricesIncludeTax ? 'checked' : ''}> Los precios de venta ya incluyen el impuesto</label></div>
         <div class="field span-2"><label class="check"><input type="checkbox" name="demo" checked> Cargar productos y clientes de demostración (puedes borrarlos después)</label></div>
       </div>
-      <div class="callout warn mt">${icon('lock', 15)} El PIN del administrador es <b>1234</b>. Cámbialo en Configuración → Usuarios.</div>`,
+      ${DB.data.meta.ownerSet ? '' : `<div class="callout warn mt">${icon('lock', 15)} El PIN del administrador es <b>1234</b>. Cámbialo en Configuración → Usuarios.</div>`}`,
     footer: `<button class="btn primary" data-ok>Comenzar</button>`,
     onOpen: m => {
       const apply = () => { const p = COUNTRY_PRESETS[m.$('[name=country]').value]; m.$('[name=currencySymbol]').value = p.currencySymbol; m.$('[name=taxName]').value = p.taxName; m.$('[name=taxRate]').value = p.taxRate; };

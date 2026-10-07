@@ -26,7 +26,7 @@ if (window.NOIR_PROVISION && NOIR_PROVISION.vendor) Object.assign(LIC_CFG, NOIR_
 /* Versión web pública (sin instalar): se entra solo con código de activación, sin prueba gratis */
 const LIC_WEB = location.protocol === 'https:' && !/^(localhost|127\.|\[::1\])/.test(location.hostname);
 if (LIC_WEB) LIC_CFG.trialDays = 0;
-/* App Android: licencia permanente con número corto, sin prueba gratis */
+/* Programa para computador: licencia permanente con número corto, sin prueba gratis */
 const LIC_APP = !!window.NOIR_SK;
 if (LIC_APP) LIC_CFG.trialDays = 0;
 const PLAN_LIMITS = { basic: { u: 2, pr: 300, on: ['credits', 'quotes'] }, premium: { u: 0, pr: 0, on: Object.keys(PLAN_FEATURES) } };
@@ -143,7 +143,7 @@ const LIC = {
   },
   /* Activa el número de licencia permanente (sin internet) */
   async activateShort(code) {
-    if (!window.NOIR_SK) throw new Error(`Este número de licencia se activa en la app NOIR STORE para Android. Pide el enlace de descarga a ${LIC_CFG.vendor}.`);
+    if (!window.NOIR_SK) throw new Error(`Este número de licencia se activa en el programa NOIR STORE para computador. Pide el enlace de descarga a ${LIC_CFG.vendor}.`);
     const r = LicShort.check(window.NOIR_SK, code);
     if (!r) throw new Error('Número de licencia inválido. Revísalo: son letras y números intercalados, por ejemplo NOIR-A1B2-C3D4-E5F6.');
     const d = DB.data;
