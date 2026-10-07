@@ -85,6 +85,8 @@ const LIC = {
   /* Estado actual: active | trial | expired | none | clock */
   status() {
     const d = DB.data, t = today();
+    // número activado antes de las suscripciones (sin fecha todavía): sigue activo hasta que el panel le publique un vencimiento
+    if (this.valid && this.payload?.short && !this.payload.e && !d.license?.revoked) return { state: 'active', daysLeft: Infinity, plan: this.payload.p, business: this.payload.n, noDate: true };
     if (this.clockBack) return { state: 'clock' };
     if (this.valid && this.payload && d.license?.revoked) return { state: 'revoked', expires: this.payload.e, plan: this.payload.p, business: this.payload.n };
     if (this.valid && this.payload) {

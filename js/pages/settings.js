@@ -334,7 +334,7 @@ Pages.settings = {
           <div class="info-grid">
             <div><div class="ig-label">Plan</div><div class="ig-value">${esc(LIC.planLabel(st))}</div></div>
             ${st.perpetual ? '<div><div class="ig-label">Vigencia</div><div class="ig-value">Permanente</div></div>' : `<div><div class="ig-label">${st.state === 'trial' ? 'Prueba termina' : 'Vence'}</div><div class="ig-value">${st.expires ? fmtDate(st.expires) : '—'}</div></div>
-            <div><div class="ig-label">Días restantes</div><div class="ig-value ${(st.daysLeft ?? 0) <= LIC_CFG.warnDays ? 'warn-text' : ''}">${st.daysLeft ?? 0}</div></div>`}
+            <div><div class="ig-label">Días restantes</div><div class="ig-value ${(st.daysLeft ?? 0) <= LIC_CFG.warnDays ? 'warn-text' : ''}">${isFinite(st.daysLeft ?? 0) ? (st.daysLeft ?? 0) : "—"}</div></div>`}
             <div><div class="ig-label">Licenciado a</div><div class="ig-value">${esc(pl?.n || DB.data.settings.company.name)}</div></div>
             <div><div class="ig-label">Número de licencia</div><div class="ig-value" style="font-family:monospace">${esc(LIC.key() || '—')}</div></div>
             <div><div class="ig-label">Proveedor</div><div class="ig-value">${esc(LIC_CFG.vendor)}</div></div>

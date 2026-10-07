@@ -130,7 +130,7 @@ const App = {
           <button class="btn chrome lg block mt" id="go">Entrar</button>
           ${defaultCreds ? '<p class="small muted center" style="margin-top:16px">Primer acceso: usuario <b>admin</b>, contraseña <b>1234</b>. Cámbiala en Mi cuenta.</p>' : ''}`}
           ${DB.data.meta.provisionError && st.state !== 'active' ? `<div class="callout warn small" style="margin-top:14px">${esc(DB.data.meta.provisionError)}</div>` : ''}
-          <div class="small muted center" style="margin-top:18px">${st.state === 'trial' ? `<span class="badge warn">Prueba gratis · ${st.daysLeft} día(s)</span> <a href="#" id="lg-act">Activar ahora</a>` : st.state === 'active' ? (st.perpetual ? `${esc(st.plan)} · permanente` : `Suscripción activa hasta ${fmtDate(st.expires)}`) : ''}</div>
+          <div class="small muted center" style="margin-top:18px">${st.state === 'trial' ? `<span class="badge warn">Prueba gratis · ${st.daysLeft} día(s)</span> <a href="#" id="lg-act">Activar ahora</a>` : st.state === 'active' ? (st.noDate ? `${esc(st.plan)} · activa` : `Suscripción activa hasta ${fmtDate(st.expires)}`) : ''}</div>
           <p class="small muted center" style="margin-top:10px">${LIC.payload?.short ? `<a href="#" id="lg-forgot">¿Olvidaste tu contraseña?</a>` : `¿Olvidaste tu ${mode === 'pin' ? 'PIN' : 'contraseña'}? Pide a un administrador que la restablezca${LIC_CFG.vendor ? ` o contacta a ${esc(LIC_CFG.vendor)}` : ''}.`}</p>
         </div></div>
       </div>`;
