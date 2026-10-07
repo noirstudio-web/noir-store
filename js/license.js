@@ -23,6 +23,9 @@ const PLAN_FEATURES = {
 const PREMIUM_EXTRAS = ['layaway', 'loyalty', 'promos', 'commissions', 'ownerAlerts', 'branding', 'support'];
 /* Los datos del proveedor llegan configurados desde el Panel de Licencias */
 if (window.NOIR_PROVISION && NOIR_PROVISION.vendor) Object.assign(LIC_CFG, NOIR_PROVISION.vendor);
+/* Versión web pública (sin instalar): se entra solo con código de activación, sin prueba gratis */
+const LIC_WEB = location.protocol === 'https:' && !/^(localhost|127\.|\[::1\])/.test(location.hostname);
+if (LIC_WEB) LIC_CFG.trialDays = 0;
 const LIC_PUBLIC_KEY ={ kty: 'EC', crv: 'P-256', x: 'hlLoieombQc23q161Ug5pdqRipCdcc9PYZ29S9ZphE4', y: '_7n-MORetUUTm3XvTDsomkSOkUkmh2O4N2LpYxaBURs' };
 
 const LIC = {
@@ -60,6 +63,7 @@ const LIC = {
   async init() {
     const d = DB.data;
     this.valid = false; this.payload = null;
+    if (d.settings.vendorInfo && !(window.NOIR_PROVISION && NOIR_PROVISION.vendor)) Object.assign(LIC_CFG, d.settings.vendorInfo);
     if (d.license && d.license.code) {
       const p = this.parse(d.license.code);
       if (p && await this.verifySig(p) && (!p.payload.i || p.payload.i === d.meta.installId)) { this.valid = true; this.payload = p.payload; }
@@ -139,12 +143,24 @@ const LIC = {
     if (pl.e < today()) throw new Error(`Este código ya venció el ${fmtDate(pl.e)}.${credsApplied ? ` Tu usuario "${pl.u}" quedó configurado; pide a ${LIC_CFG.vendor} un código de renovación.` : ''}`);
     if (this.valid && this.payload && pl.e < this.payload.e && !pl.u) throw new Error(`Ya tienes una suscripción hasta el ${fmtDate(this.payload.e)}; este código es anterior.`);
     d.license = { code: p.clean, activatedAt: nowISO(), id: pl.id };
-    if (pl.n && (!d.settings.company.name || d.settings.company.name === 'NOIR STORE')) d.settings.company.name = pl.n;
+    this.applyBusiness(pl);
     d.meta.lastSeen = today(); this.clockBack = false;
     this.valid = true; this.payload = pl;
     audit('Activación de suscripción', `${pl.p || ''} hasta ${fmtDate(pl.e)}${pl.u ? ' · credenciales de administrador actualizadas' : ''}`);
     DB.commit(); await DB.persist();
     return pl;
+  },
+
+  /* Configura el negocio con los datos que trae el código (solo lo que aún no se ha personalizado) */
+  applyBusiness(pl) {
+    const d = DB.data, s = d.settings;
+    if (pl.co && !d.meta.countryFromLicense && typeof applyCountry === 'function') { applyCountry(s, pl.co); d.meta.countryFromLicense = true; }
+    if (pl.n && (!s.company.name || s.company.name === 'NOIR STORE')) s.company.name = pl.n;
+    if (pl.cp && !s.company.phone) s.company.phone = pl.cp;
+    if (pl.ca && !s.company.address) s.company.address = pl.ca;
+    if (pl.vn || pl.vw) { s.vendorInfo = { vendor: pl.vn || LIC_CFG.vendor, whatsapp: pl.vw || LIC_CFG.whatsapp || '' }; Object.assign(LIC_CFG, s.vendorInfo); }
+    s.setupDone = true;
+    if (pl.u) { try { localStorage.setItem('noir-last-user', pl.u); } catch (e) { } }
   },
 
   /* Asigna el usuario y la contraseña del código al administrador correcto */
@@ -195,7 +211,7 @@ async function applyProvision() {
 function activationScreen(onDone) {
   const st = LIC.status();
   const titles = {
-    none: ['Activa tu sistema', `Tu periodo de prueba terminó. Ingresa el código de activación que te entregó ${LIC_CFG.vendor}.`],
+    none: ['Activa tu sistema', LIC_CFG.trialDays > 0 ? `Tu periodo de prueba terminó. Ingresa el código de activación que te entregó ${LIC_CFG.vendor}.` : `Bienvenido a NOIR STORE. Pega el código de activación que te entregó ${LIC_CFG.vendor}; después entras con tu usuario y contraseña.`],
     expired: ['Suscripción vencida', `Tu suscripción venció el ${fmtDate(st.expires)}. Ingresa un código de renovación para continuar.`],
     clock: ['Revisa la fecha del equipo', 'La fecha de esta computadora es anterior a la última vez que se usó el sistema. Corrige la fecha y hora de Windows y vuelve a abrir el sistema.'],
     trial: ['Activa tu sistema', `Estás en periodo de prueba (${st.daysLeft} días restantes).`],
