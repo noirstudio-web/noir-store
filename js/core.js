@@ -286,9 +286,10 @@ const DB = {
 
   async load() {
     try {
-      if (location.protocol.startsWith('http')) {
+      // la app Android (y otros servidores web) devuelven la página para cualquier ruta: solo es "servidor" si responde datos
+      if (location.protocol.startsWith('http') && !window.Capacitor) {
         const r = await fetch('api/db', { cache: 'no-store' });
-        if (r.ok) { this.mode = 'server'; const j = await r.json(); if (j && j.meta) this.data = j; }
+        if (r.ok && (r.headers.get('content-type') || '').includes('json')) { const j = await r.json(); this.mode = 'server'; if (j && j.meta) this.data = j; }
       }
     } catch (e) { /* sin servidor */ }
     if (this.mode !== 'server') {
