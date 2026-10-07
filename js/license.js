@@ -26,6 +26,10 @@ if (window.NOIR_PROVISION && NOIR_PROVISION.vendor) Object.assign(LIC_CFG, NOIR_
 /* Versión web pública (sin instalar): se entra solo con código de activación, sin prueba gratis */
 const LIC_WEB = location.protocol === 'https:' && !/^(localhost|127\.|\[::1\])/.test(location.hostname);
 if (LIC_WEB) LIC_CFG.trialDays = 0;
+/* App Android: licencia permanente con número corto, sin prueba gratis */
+const LIC_APP = !!window.NOIR_SK;
+if (LIC_APP) LIC_CFG.trialDays = 0;
+const PLAN_LIMITS = { basic: { u: 2, pr: 300, on: ['credits', 'quotes'] }, premium: { u: 0, pr: 0, on: Object.keys(PLAN_FEATURES) } };
 const LIC_PUBLIC_KEY ={ kty: 'EC', crv: 'P-256', x: 'hlLoieombQc23q161Ug5pdqRipCdcc9PYZ29S9ZphE4', y: '_7n-MORetUUTm3XvTDsomkSOkUkmh2O4N2LpYxaBURs' };
 
 const LIC = {
@@ -68,6 +72,10 @@ const LIC = {
       const p = this.parse(d.license.code);
       if (p && await this.verifySig(p) && (!p.payload.i || p.payload.i === d.meta.installId)) { this.valid = true; this.payload = p.payload; }
     }
+    if (d.license && d.license.short) {
+      const r = LicShort.check(window.NOIR_SK, d.license.short);
+      if (r) { this.valid = true; this.payload = this.shortPayload(r); }
+    }
     const t = today();
     this.clockBack = d.meta.lastSeen && t < addDays(d.meta.lastSeen, -1);
     if (!this.clockBack && (!d.meta.lastSeen || t > d.meta.lastSeen)) { d.meta.lastSeen = t; DB.commit(); }
@@ -76,6 +84,7 @@ const LIC = {
   /* Estado actual: active | trial | expired | none | clock */
   status() {
     const d = DB.data, t = today();
+    if (this.valid && this.payload?.perpetual) return { state: 'active', perpetual: true, daysLeft: Infinity, plan: this.payload.p, business: this.payload.n };
     if (this.clockBack) return { state: 'clock' };
     if (this.valid && this.payload && d.license?.revoked) return { state: 'revoked', expires: this.payload.e, plan: this.payload.p, business: this.payload.n };
     if (this.valid && this.payload) {
@@ -129,7 +138,24 @@ const LIC = {
   },
 
   /* Activa un código nuevo (o de renovación / restablecimiento de acceso) */
+  shortPayload(r) {
+    return { k: r.key, tier: r.tier, p: 'Licencia ' + (r.tier === 'premium' ? 'Premium' : 'Básica'), n: DB.data.settings.company.name, perpetual: true, lim: PLAN_LIMITS[r.tier] };
+  },
+  /* Activa el número de licencia permanente (sin internet) */
+  async activateShort(code) {
+    if (!window.NOIR_SK) throw new Error(`Este número de licencia se activa en la app NOIR STORE para Android. Pide el enlace de descarga a ${LIC_CFG.vendor}.`);
+    const r = LicShort.check(window.NOIR_SK, code);
+    if (!r) throw new Error('Número de licencia inválido. Revísalo: son letras y números intercalados, por ejemplo NOIR-A1B2-C3D4-E5F6.');
+    const d = DB.data;
+    d.license = { short: r.key, tier: r.tier, activatedAt: nowISO() };
+    this.valid = true; this.payload = this.shortPayload(r);
+    audit('Activación de licencia', `${this.payload.p} · ${r.key}`);
+    DB.commit(); await DB.persist();
+    return this.payload;
+  },
+
   async activate(code) {
+    if (LIC_SHORT_RE.test(String(code))) return this.activateShort(code);
     const d = DB.data;
     const p = this.parse(code);
     if (!p) throw new Error('El código no tiene un formato válido. Cópialo completo, empieza con "NOIR1."');
@@ -138,8 +164,13 @@ const LIC = {
     if (pl.type || !pl.e) throw new Error('Esto no es un código de activación');
     if (pl.i && pl.i !== d.meta.installId) throw new Error(`Este código es para otra instalación (${pl.i}). El ID de este equipo es ${d.meta.installId}.`);
     // el usuario y la contraseña firmados se aplican aunque el código ya haya vencido
+    if (d.license && d.license.short && LicShort.check(window.NOIR_SK, pl.k || '')?.key !== d.license.short) throw new Error('Este código es para otra licencia. Pide a ' + LIC_CFG.vendor + ' el código de tu número ' + d.license.short + '.');
     const credsApplied = this.applyCredentials(pl);
     if (credsApplied) { audit('Acceso del administrador', `Usuario ${pl.u} configurado por ${LIC_CFG.vendor}`); DB.commit(); await DB.persist(); }
+    if (d.license && d.license.short) {
+      if (!credsApplied) throw new Error('Tu licencia es permanente: no necesitas este código.');
+      return { ...this.payload, u: pl.u, credsOnly: true };
+    }
     if (pl.e < today()) throw new Error(`Este código ya venció el ${fmtDate(pl.e)}.${credsApplied ? ` Tu usuario "${pl.u}" quedó configurado; pide a ${LIC_CFG.vendor} un código de renovación.` : ''}`);
     if (this.valid && this.payload && pl.e < this.payload.e && !pl.u) throw new Error(`Ya tienes una suscripción hasta el ${fmtDate(this.payload.e)}; este código es anterior.`);
     d.license = { code: p.clean, activatedAt: nowISO(), id: pl.id };
@@ -222,7 +253,7 @@ async function applyProvision() {
 function activationScreen(onDone) {
   const st = LIC.status();
   const titles = {
-    none: ['Activa tu sistema', LIC_CFG.trialDays > 0 ? `Tu periodo de prueba terminó. Ingresa el código de activación que te entregó ${LIC_CFG.vendor}.` : `Bienvenido a NOIR STORE. Pega el código de activación que te entregó ${LIC_CFG.vendor}; después entras con tu usuario y contraseña.`],
+    none: LIC_APP ? ['Activa tu licencia', `Escribe el número de licencia que te entregó ${LIC_CFG.vendor}. Es para siempre: solo lo haces una vez.`] : ['Activa tu sistema', LIC_CFG.trialDays > 0 ? `Tu periodo de prueba terminó. Ingresa el código de activación que te entregó ${LIC_CFG.vendor}.` : `Bienvenido a NOIR STORE. Pega el código de activación que te entregó ${LIC_CFG.vendor}; después entras con tu usuario y contraseña.`],
     expired: ['Suscripción vencida', `Tu suscripción venció el ${fmtDate(st.expires)}. Ingresa un código de renovación para continuar.`],
     clock: ['Revisa la fecha del equipo', 'La fecha de esta computadora es anterior a la última vez que se usó el sistema. Corrige la fecha y hora de Windows y vuelve a abrir el sistema.'],
     trial: ['Activa tu sistema', `Estás en periodo de prueba (${st.daysLeft} días restantes).`],
@@ -242,7 +273,7 @@ function activationScreen(onDone) {
         ${LIC.key() ? `<div class="field mb"><label>Tu código de licencia</label>
           <div class="input-group"><input id="ac-id" value="${esc(LIC.key())}" readonly style="font-family:monospace;letter-spacing:.08em"><button class="btn" id="ac-copy" title="Copiar">${icon('copy', 15)}</button></div>
           <span class="hint">Indícaselo a ${esc(LIC_CFG.vendor)} para renovar o reactivar.</span></div>` : ''}
-        <div class="field"><label>Código de activación</label><textarea id="ac-code" rows="4" placeholder="NOIR1.xxxxxxxx…" style="font-family:monospace;font-size:12px;word-break:break-all"></textarea></div>
+        ${LIC_APP ? '<div class="field"><label>Número de licencia</label><input id="ac-code" placeholder="NOIR-A1B2-C3D4-E5F6" autocapitalize="characters" autocomplete="off" spellcheck="false" style="font-family:monospace;font-size:19px;letter-spacing:.08em;text-align:center"></div>' : '<div class="field"><label>Código de activación</label><textarea id="ac-code" rows="4" placeholder="NOIR1.xxxxxxxx…" style="font-family:monospace;font-size:12px;word-break:break-all"></textarea></div>'}
         <button class="btn chrome lg block mt" id="ac-go">${icon('unlock', 18)} Activar</button>`}
         <div class="row mt" style="justify-content:center">
           ${wa ? `<a class="btn ghost" href="${wa}" target="_blank" rel="noopener">${waIcon(15)} Contactar a ${esc(LIC_CFG.vendor)}</a>` : ''}
@@ -259,7 +290,7 @@ function activationScreen(onDone) {
     go.disabled = true;
     try {
       const pl = await LIC.activate($('#ac-code').value);
-      toast(`¡Sistema activado hasta el ${fmtDate(pl.e)}!`, 'ok', 5000);
+      toast(pl.perpetual ? `¡${pl.p} activada!` : `¡Sistema activado hasta el ${fmtDate(pl.e)}!`, 'ok', 5000);
       onDone(true, pl);
     } catch (e) { toast(e.message, 'err', 6000); go.disabled = false; }
   };

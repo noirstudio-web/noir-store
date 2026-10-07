@@ -89,6 +89,7 @@ const App = {
   /* Bloquea con la pantalla de activación si la suscripción no está vigente */
   gate() {
     if (!LIC.usable()) { this.user = null; sessionStorage.removeItem('noir-user'); activationScreen(() => this.gate()); return; }
+    if (LIC.payload?.perpetual && needsOwner()) { ownerScreen(() => this.gate()); return; }
     this.user ? this.shell() : this.login();
   },
 
@@ -124,12 +125,13 @@ const App = {
           <button class="btn chrome lg block mt" id="go">Entrar</button>
           ${defaultCreds ? '<p class="small muted center" style="margin-top:16px">Primer acceso: usuario <b>admin</b>, contraseña <b>1234</b>. Cámbiala en Mi cuenta.</p>' : ''}`}
           ${DB.data.meta.provisionError && st.state !== 'active' ? `<div class="callout warn small" style="margin-top:14px">${esc(DB.data.meta.provisionError)}</div>` : ''}
-          <div class="small muted center" style="margin-top:18px">${st.state === 'trial' ? `<span class="badge warn">Prueba gratis · ${st.daysLeft} día(s)</span> <a href="#" id="lg-act">Activar ahora</a>` : st.state === 'active' ? `Suscripción activa hasta ${fmtDate(st.expires)}` : ''}</div>
-          <p class="small muted center" style="margin-top:10px">¿Olvidaste tu ${mode === 'pin' ? 'PIN' : 'contraseña'}? Pide a un administrador que la restablezca${LIC_CFG.vendor ? ` o contacta a ${esc(LIC_CFG.vendor)}` : ''}.</p>
+          <div class="small muted center" style="margin-top:18px">${st.state === 'trial' ? `<span class="badge warn">Prueba gratis · ${st.daysLeft} día(s)</span> <a href="#" id="lg-act">Activar ahora</a>` : st.state === 'active' ? (st.perpetual ? `${esc(st.plan)} · permanente` : `Suscripción activa hasta ${fmtDate(st.expires)}`) : ''}</div>
+          <p class="small muted center" style="margin-top:10px">${LIC.payload?.perpetual ? `<a href="#" id="lg-forgot">¿Olvidaste tu contraseña?</a>` : `¿Olvidaste tu ${mode === 'pin' ? 'PIN' : 'contraseña'}? Pide a un administrador que la restablezca${LIC_CFG.vendor ? ` o contacta a ${esc(LIC_CFG.vendor)}` : ''}.`}</p>
         </div></div>
       </div>`;
     $$('[data-mode]').forEach(b => b.onclick = () => { try { localStorage.setItem('noir-login-mode', b.dataset.mode); } catch (e) { } this.login(b.dataset.mode); });
     const act = $('#lg-act'); if (act) act.onclick = e => { e.preventDefault(); activationScreen(() => this.gate()); };
+    const forgot = $('#lg-forgot'); if (forgot) forgot.onclick = e => { e.preventDefault(); forgotModal(() => this.login()); };
     const enter = (u, how) => {
       try { localStorage.setItem('noir-last-user', u.username); } catch (e) { }
       this.user = u; sessionStorage.setItem('noir-user', u.id);
@@ -271,6 +273,63 @@ const App = {
 };
 
 /* ---------- Asistente de configuración inicial ---------- */
+/* Olvidé mi contraseña: el proveedor envía un código firmado que restablece el usuario del dueño */
+function forgotModal(onDone) {
+  const wa = LIC.contactLink('restablecer mi contraseña');
+  openModal({
+    title: '¿Olvidaste tu contraseña?', size: 'sm',
+    body: `<p class="muted small" style="margin-top:0">Si eres empleado, pide al administrador que te la cambie en Configuración → Usuarios.<br><br>Si eres el dueño, pide a ${esc(LIC_CFG.vendor)} un <b>código para restablecer</b> y pégalo aquí${LIC.key() ? ` (tu número de licencia es <b class="mono">${esc(LIC.key())}</b>)` : ''}.</p>
+      <div class="field"><label>Código para restablecer</label><textarea id="fg-code" rows="4" placeholder="NOIR1.xxxxxxxx…" style="font-family:monospace;font-size:12px;word-break:break-all"></textarea></div>`,
+    footer: `${wa ? `<a class="btn ghost" href="${wa}" target="_blank" rel="noopener">${waIcon(15)} Pedir código</a>` : ''}<button class="btn ghost" data-close>Cancelar</button><button class="btn primary" data-ok>Restablecer</button>`,
+    onOpen: m => {
+      m.$('[data-ok]').onclick = async () => {
+        try {
+          const pl = await LIC.activate(m.$('#fg-code').value);
+          if (!pl.u) throw new Error('Ese código no trae usuario ni contraseña.');
+          try { localStorage.setItem('noir-last-user', pl.u); } catch (e) { }
+          m.close(); toast(`Listo. Entra con el usuario "${pl.u}" y la contraseña que te enviaron.`, 'ok', 7000); onDone();
+        } catch (e) { toast(e.message, 'err', 7000); }
+      };
+    },
+  });
+}
+
+/* App: después de activar la licencia, el dueño crea su propio usuario y contraseña */
+function needsOwner() { return !DB.data.meta.ownerSet && DB.data.users.some(u => u.username === 'admin' && checkPassword(u, '1234')); }
+function ownerScreen(onDone) {
+  const s = DB.data.settings;
+  $('#root').innerHTML = `
+    <div class="login">
+      <div class="login-art"><img src="assets/logo-principal.png" alt="NOIR"><div class="tagline">Sistema de gestión comercial</div></div>
+      <div class="login-form"><div class="login-box" style="max-width:440px">
+        <div class="badge ok" style="margin-bottom:14px">${icon('check', 12)} ${esc(LIC.payload.p)} activada</div>
+        <h2>Crea tu acceso</h2><p>Con este usuario y contraseña entrarás a tu sistema. Anótalos en un lugar seguro.</p>
+        <div class="field mb"><label>Nombre del negocio</label><input id="ow-biz" value="${esc(s.company.name === 'NOIR STORE' ? '' : s.company.name)}" placeholder="Mi tienda"></div>
+        <div class="field mb"><label>Tu nombre</label><input id="ow-name" placeholder="Nombre y apellido"></div>
+        <div class="field mb"><label>Usuario</label><input id="ow-user" autocapitalize="off" autocomplete="username" spellcheck="false" placeholder="ej. maria"></div>
+        <div class="field mb"><label>Contraseña</label><input id="ow-pass" type="password" autocomplete="new-password" placeholder="Mínimo 4 caracteres"></div>
+        <div class="field mb"><label>Repite la contraseña</label><input id="ow-pass2" type="password" autocomplete="new-password"></div>
+        <button class="btn chrome lg block mt" id="ow-go">Guardar y entrar</button>
+      </div></div>
+    </div>`;
+  $('#ow-go').onclick = async () => {
+    const biz = $('#ow-biz').value.trim(), name = $('#ow-name').value.trim(), user = $('#ow-user').value.trim(), p1 = $('#ow-pass').value, p2 = $('#ow-pass2').value;
+    if (!biz || !user) return toast('Escribe el nombre del negocio y el usuario', 'warn');
+    if (/\s/.test(user)) return toast('El usuario no puede tener espacios', 'warn');
+    if (p1.length < 4) return toast('La contraseña debe tener al menos 4 caracteres', 'warn');
+    if (p1 !== p2) return toast('Las contraseñas no coinciden', 'warn');
+    const d = DB.data, admin = d.users.find(u => u.username === 'admin' && checkPassword(u, '1234'));
+    admin.username = user; if (name) admin.name = name; setPassword(admin, p1);
+    s.company.name = biz; LIC.payload.n = biz; d.meta.ownerSet = true;
+    audit('Acceso del dueño creado', `Usuario ${user}`);
+    DB.commit(); await DB.persist();
+    try { localStorage.setItem('noir-last-user', user); } catch (e) { }
+    App.user = admin; sessionStorage.setItem('noir-user', admin.id);
+    toast(`¡Bienvenido, ${name || user}!`);
+    onDone();
+  };
+}
+
 function setupWizard() {
   const s = DB.data.settings;
   openModal({

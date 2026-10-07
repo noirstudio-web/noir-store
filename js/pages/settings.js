@@ -106,7 +106,7 @@ Pages.settings = {
   tab: 'company',
   render(el) {
     const s = D.s;
-    const tabs = [['company', 'Empresa'], ['sales', 'Ventas e impuestos'], ['docs', 'Documentos'], ['loyalty', 'Puntos y apartados'], ['whatsapp', 'WhatsApp'], ['account', 'Mi cuenta'], ['users', 'Usuarios'], ['license', 'Suscripción'], ['catalogs', 'Catálogos'], ['backup', 'Respaldo y datos'], ['sql', 'Base de datos SQL'], ['audit', 'Bitácora']];
+    const tabs = [['company', 'Empresa'], ['sales', 'Ventas e impuestos'], ['docs', 'Documentos'], ['loyalty', 'Puntos y apartados'], ['whatsapp', 'WhatsApp'], ['account', 'Mi cuenta'], ['users', 'Usuarios'], ['license', LIC.payload?.perpetual || LIC_APP ? 'Licencia' : 'Suscripción'], ['catalogs', 'Catálogos'], ['backup', 'Respaldo y datos'], ['sql', 'Base de datos SQL'], ['audit', 'Bitácora']];
     el.innerHTML = `<div class="tabs">${tabs.map(([k, l]) => `<button class="tab ${this.tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div><div id="body"></div>`;
     $$('[data-tab]', el).forEach(b => b.onclick = () => { this.tab = b.dataset.tab; this.render(el); });
     const body = $('#body', el);
@@ -325,15 +325,15 @@ Pages.settings = {
       const st = LIC.status(), pl = LIC.payload;
       const stBadge = { active: '<span class="badge ok">Activa</span>', trial: '<span class="badge warn">Prueba gratis</span>', expired: '<span class="badge err">Vencida</span>', none: '<span class="badge err">Sin activar</span>', clock: '<span class="badge err">Fecha incorrecta</span>', revoked: '<span class="badge err">Desactivada</span>' }[st.state];
       const lim = LIC.limits();
-      const wa = LIC.contactLink('renovar mi suscripción');
+      const wa = st.perpetual ? '' : LIC.contactLink('renovar mi suscripción');
       body.innerHTML = `<div class="grid g-2">
-        <div class="card card-pad"><h3 style="margin:0 0 14px;font:600 15px var(--display)">${icon('lock', 17)} Estado de la suscripción ${stBadge}</h3>
+        <div class="card card-pad"><h3 style="margin:0 0 14px;font:600 15px var(--display)">${icon('lock', 17)} ${st.perpetual ? 'Tu licencia' : 'Estado de la suscripción'} ${stBadge}</h3>
           <div class="info-grid">
             <div><div class="ig-label">Plan</div><div class="ig-value">${esc(LIC.planLabel(st))}</div></div>
-            <div><div class="ig-label">${st.state === 'trial' ? 'Prueba termina' : 'Vence'}</div><div class="ig-value">${st.expires ? fmtDate(st.expires) : '—'}</div></div>
-            <div><div class="ig-label">Días restantes</div><div class="ig-value ${(st.daysLeft ?? 0) <= LIC_CFG.warnDays ? 'warn-text' : ''}">${st.daysLeft ?? 0}</div></div>
+            ${st.perpetual ? '<div><div class="ig-label">Vigencia</div><div class="ig-value">Permanente</div></div>' : `<div><div class="ig-label">${st.state === 'trial' ? 'Prueba termina' : 'Vence'}</div><div class="ig-value">${st.expires ? fmtDate(st.expires) : '—'}</div></div>
+            <div><div class="ig-label">Días restantes</div><div class="ig-value ${(st.daysLeft ?? 0) <= LIC_CFG.warnDays ? 'warn-text' : ''}">${st.daysLeft ?? 0}</div></div>`}
             <div><div class="ig-label">Licenciado a</div><div class="ig-value">${esc(pl?.n || DB.data.settings.company.name)}</div></div>
-            <div><div class="ig-label">Código de licencia</div><div class="ig-value" style="font-family:monospace">${esc(LIC.key() || '—')}</div></div>
+            <div><div class="ig-label">Número de licencia</div><div class="ig-value" style="font-family:monospace">${esc(LIC.key() || '—')}</div></div>
             <div><div class="ig-label">Proveedor</div><div class="ig-value">${esc(LIC_CFG.vendor)}</div></div>
           </div>
           <div class="divider"></div>
@@ -345,14 +345,14 @@ Pages.settings = {
           </div>
           <div class="row mt">${wa ? `<a class="btn success" href="${wa}" target="_blank" rel="noopener">${waIcon(15)} Pedir renovación por WhatsApp</a>` : ''}
           ${lim.tier === 'basic' && LIC_CFG.whatsapp ? `<a class="btn" href="${LIC.contactLink('mejorar mi plan a Premium')}" target="_blank" rel="noopener">${icon('up', 15)} Mejorar a Premium</a>` : ''}</div></div>
-        <div class="card card-pad"><h3 style="margin:0 0 6px;font:600 15px var(--display)">Ingresar código de activación</h3>
-          <p class="muted small" style="margin-top:0">Pega el código de renovación o de restablecimiento de acceso que te enviaron.</p>
-          <textarea id="lic-code" rows="5" placeholder="NOIR1.xxxxxxxx…" style="font-family:monospace;font-size:12px;word-break:break-all"></textarea>
+        <div class="card card-pad"><h3 style="margin:0 0 6px;font:600 15px var(--display)">${st.perpetual ? 'Cambiar a otro plan' : 'Ingresar código de activación'}</h3>
+          <p class="muted small" style="margin-top:0">${st.perpetual ? `¿Compraste ${lim.tier === 'basic' ? 'Premium' : 'otra licencia'}? Escribe aquí el número nuevo que te entregó ${esc(LIC_CFG.vendor)}. Si te enviaron un código para restablecer tu contraseña, pégalo aquí.` : 'Pega el código de renovación o de restablecimiento de acceso que te enviaron.'}</p>
+          <textarea id="lic-code" rows="${st.perpetual ? 2 : 5}" placeholder="${st.perpetual ? 'NOIR-A1B2-C3D4-E5F6' : 'NOIR1.xxxxxxxx…'}" style="font-family:monospace;font-size:${st.perpetual ? 16 : 12}px;word-break:break-all"></textarea>
           <button class="btn primary mt" id="lic-go">${icon('unlock', 15)} Activar código</button></div></div>`;
       $('#lic-go', body).onclick = async () => {
         try {
           const pl2 = await LIC.activate($('#lic-code', body).value);
-          toast(`Suscripción activa hasta el ${fmtDate(pl2.e)}`, 'ok', 5000);
+          toast(pl2.credsOnly ? 'Usuario y contraseña restablecidos' : pl2.perpetual ? `¡${pl2.p} activada!` : `Suscripción activa hasta el ${fmtDate(pl2.e)}`, 'ok', 5000);
           if (pl2.u) { toast('Se actualizaron las credenciales del administrador. Vuelve a iniciar sesión.', 'info', 6000); setTimeout(() => App.logout(), 1500); }
           else { reload(); App.licPill(); }
         } catch (e) { toast(e.message, 'err', 6000); }
