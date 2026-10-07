@@ -430,8 +430,8 @@ Pages.settings = {
           <div class="info-grid"><div><div class="ig-label">Modo</div><div class="ig-value">${DB.mode === 'server' ? 'Servidor local' : 'Navegador'}</div></div><div><div class="ig-label">Tamaño</div><div class="ig-value">${(size / 1024).toFixed(0)} KB</div></div><div><div class="ig-label">Último guardado</div><div class="ig-value">${fmtDateTime(DB.data.meta.savedAt)}</div></div></div></div>
         <div class="card card-pad"><h3 style="margin:0 0 6px;font:600 15px var(--display)">Respaldo</h3><p class="muted" style="margin-top:0">Descarga una copia completa de toda la información (productos, ventas, clientes, configuración) o restaura una copia anterior.</p>
           <div class="row"><button class="btn primary" id="bk-dl">${icon('download', 16)} Descargar respaldo</button><button class="btn" id="bk-up">${icon('upload', 16)} Restaurar respaldo</button></div></div>
-        ${isAdmin() ? `<div class="card card-pad"><h3 style="margin:0 0 6px;font:600 15px var(--display)">Datos de demostración</h3><p class="muted" style="margin-top:0">Agrega productos, clientes y ventas de ejemplo para practicar.</p><button class="btn" id="bk-demo">${icon('spark', 15)} Cargar demo</button></div>
-        <div class="card card-pad" style="border-color:rgba(255,97,97,.3)"><h3 style="margin:0 0 6px;font:600 15px var(--display)" class="err-text">Zona peligrosa</h3><p class="muted" style="margin-top:0">Borra movimientos (ventas, compras, caja…) conservando productos y clientes, o borra absolutamente todo.</p>
+        ${isAdmin() ? `${LIC_APP ? '' : `<div class="card card-pad"><h3 style="margin:0 0 6px;font:600 15px var(--display)">Datos de demostración</h3><p class="muted" style="margin-top:0">Agrega productos, clientes y ventas de ejemplo para practicar.</p><button class="btn" id="bk-demo">${icon('spark', 15)} Cargar demo</button></div>`}
+        <div class="card card-pad" style="border-color:rgba(255,97,97,.3)"><h3 style="margin:0 0 6px;font:600 15px var(--display)" class="err-text">Zona peligrosa</h3><p class="muted" style="margin-top:0">Borra movimientos (ventas, compras, caja…) conservando productos y clientes, o deja todo en ceros (se conservan la licencia, los usuarios y la configuración).</p>
           <div class="row"><button class="btn danger" id="bk-tx">Borrar transacciones</button><button class="btn danger" id="bk-all">Borrar todo</button></div></div>` : ''}</div>`;
       $('#bk-dl', body).onclick = () => { downloadFile(`noir-store-respaldo-${today()}.json`, JSON.stringify(DB.data), 'application/json'); s.lastBackup = nowISO(); DB.commit(); };
       $('#bk-up', body).onclick = async () => {
@@ -443,12 +443,12 @@ Pages.settings = {
         DB.replaceAll(data); await DB.persist(); toast('Respaldo restaurado'); setTimeout(() => location.reload(), 700);
       };
       if (isAdmin()) {
-        $('#bk-demo', body).onclick = async () => { if (await confirmBox('¿Agregar datos de demostración?')) { loadDemoData(); toast('Datos de demostración cargados'); App.route(); } };
+        if ($('#bk-demo', body)) $('#bk-demo', body).onclick = async () => { if (await confirmBox('¿Agregar datos de demostración?')) { loadDemoData(); toast('Datos de demostración cargados'); App.route(); } };
         const wipe = async all => {
           const w = await promptBox(`Escribe <b>BORRAR</b> para confirmar.`.replace(/<\/?b>/g, ''), { title: all ? 'Borrar todo' : 'Borrar transacciones', required: true });
           if (w !== 'BORRAR') return w !== null && toast('Confirmación incorrecta', 'warn');
           downloadFile(`noir-store-antes-de-borrar-${today()}.json`, JSON.stringify(DB.data), 'application/json');
-          if (all) { const fresh = seedData(); fresh.meta.rev = DB.data.meta.rev; fresh.settings.setupDone = true; fresh.users = DB.data.users; DB.replaceAll(fresh); }
+          if (all) { const old = DB.data, fresh = seedData(); fresh.meta = { ...old.meta }; fresh.settings = old.settings; fresh.users = old.users; if (old.license) fresh.license = old.license; fresh.brands = []; DB.replaceAll(fresh); }   // conserva licencia, usuarios y configuración
           else {
             ['movements', 'purchases', 'supplierPayments', 'quotes', 'invoices', 'payments', 'returns', 'cashSessions', 'cashMoves', 'expenses', 'held'].forEach(k => DB.data[k] = []);
             DB.data.products.forEach(p => p.variants.forEach(v => v.stock = 0));

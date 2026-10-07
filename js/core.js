@@ -388,7 +388,7 @@ function seedData() {
     users: [{ id: 'u-admin', name: 'Administrador', username: 'admin', pin: '1234', role: 'admin', active: true }],
     customers: [{ id: 'walkin', name: 'Consumidor final', docId: '', phone: '', email: '', address: '', creditLimit: 0, creditDays: 0, storeCredit: 0, notes: '', createdAt: nowISO(), system: true }],
     categories: ['Camisas', 'Camisetas', 'Pantalones', 'Jeans', 'Vestidos', 'Faldas', 'Abrigos', 'Calzado', 'Accesorios', 'Ropa interior'].map(n => ({ id: uid(), name: n })),
-    brands: [{ id: uid(), name: 'NOIR' }],
+    brands: [],
   };
 }
 function migrate(d) {

@@ -341,7 +341,6 @@ function setupWizard() {
         <div class="field"><label>Símbolo de moneda</label><input name="currencySymbol" value="${esc(s.currencySymbol)}"></div>
         <div class="field"><label>Impuesto</label><div class="input-group"><input name="taxName" value="${esc(s.taxName)}" style="flex:1.4"><input name="taxRate" type="number" step="0.01" value="${s.taxRate}" style="flex:1"></div></div>
         <div class="field span-2"><label class="check"><input type="checkbox" name="pricesIncludeTax" ${s.pricesIncludeTax ? 'checked' : ''}> Los precios de venta ya incluyen el impuesto</label></div>
-        <div class="field span-2"><label class="check"><input type="checkbox" name="demo" checked> Cargar productos y clientes de demostración (puedes borrarlos después)</label></div>
       </div>
       ${DB.data.meta.ownerSet ? '' : `<div class="callout warn mt">${icon('lock', 15)} El PIN del administrador es <b>1234</b>. Cámbialo en Configuración → Usuarios.</div>`}`,
     footer: `<button class="btn primary" data-ok>Comenzar</button>`,
@@ -356,12 +355,12 @@ function setupWizard() {
         s.currencySymbol = f.currencySymbol || '$';
         s.taxName = f.taxName || 'Impuesto'; s.taxRate = +f.taxRate || 0; s.pricesIncludeTax = f.pricesIncludeTax;
         s.setupDone = true;
-        if (f.demo) loadDemoData();
         DB.commit(); m.close(); App.route();
         toast('¡Listo! Tu sistema está configurado');
       };
     },
-    onClose: () => { if (!s.setupDone) { s.setupDone = true; DB.commit(); } },
+    // si se cierra sin completar, queda configurado para Colombia (se puede cambiar en Configuración)
+    onClose: () => { if (!s.setupDone) { if (!s.country) applyCountry(s, 'CO'); s.setupDone = true; DB.commit(); App.route(); } },
   });
 }
 
