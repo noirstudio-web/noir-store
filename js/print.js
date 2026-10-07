@@ -154,6 +154,7 @@ const PR = {
       ${sch.length > 1 ? `<h3 class="sec">Plan de pagos</h3><table class="items"><thead><tr><th>Cuota</th><th>Vencimiento</th><th class="r">Monto</th></tr></thead><tbody>${sch.map(c => `<tr><td>${c.n}</td><td>${fmtDate(c.date)}</td><td class="r">${money(c.amount)}</td></tr>`).join('')}</tbody></table>` : ''}
       ${inv.notes ? `<div class="notes"><b>Notas:</b> ${esc(inv.notes)}</div>` : ''}
       ${inv.type === 'credito' ? '<div class="sign"><div>Firma del cliente</div><div>Entregado por</div></div>' : ''}
+      ${(() => { const wl = D.warrantyLines(inv); return wl.length ? `<h3 class="sec">Garantía</h3><table class="items"><thead><tr><th>Artículo</th><th class="r">Días</th><th class="r">Válida hasta</th></tr></thead><tbody>${wl.map(x => `<tr><td>${esc(x.it.name)}${x.it.variant ? ' · ' + esc(x.it.variant) : ''}</td><td class="r">${x.w.days}</td><td class="r">${fmtDate(x.w.until)}</td></tr>`).join('')}</tbody></table>${D.s.warrantyTerms ? `<div class="mut sm" style="margin-top:6px">${esc(D.s.warrantyTerms)}</div>` : ''}` : ''; })()}
       <div class="foot">${esc(D.s.invoiceTerms)}</div>`;
     printHTML(html, 'carta');
   },
@@ -190,6 +191,7 @@ const PR = {
         ${D.schedule(inv).map(c => `<div class="t-row sm"><span>Cuota ${c.n} · ${fmtDate(c.date)}</span><span>${money(c.amount)}</span></div>`).join('')}
         <br><br><div class="t-center">______________________<br>Firma del cliente</div>` : ''}
       ${inv.pointsEarned || inv.pointsUsed ? `<div class="t-sep"></div>${inv.pointsUsed ? `<div class="t-row"><span>Puntos usados</span><span>${inv.pointsUsed}</span></div>` : ''}${inv.pointsEarned ? `<div class="t-row"><span>Puntos ganados</span><span>+${inv.pointsEarned}</span></div>` : ''}<div class="t-row b"><span>Tus puntos</span><span>${inv.pointsBalance ?? ''}</span></div>` : ''}
+      ${(() => { const wl = D.warrantyLines(inv); if (!wl.length) return ''; const max = wl.reduce((a, x) => x.w.until > a ? x.w.until : a, ''); const same = wl.every(x => x.w.until === max); return `<div class="t-sep"></div><div class="t-center b">GARANTÍA</div>${same ? `<div class="t-center">Válida hasta ${fmtDate(max)} (${wl[0].w.days} días)</div>` : wl.map(x => `<div class="t-row sm"><span>${esc(x.it.name)}</span><span>hasta ${fmtDate(x.w.until)}</span></div>`).join('')}`; })()}
       <div class="t-sep"></div>
       <div class="t-center">${esc(s.ticketFooter).replace(/\n/g, '<br>')}</div>
       <div class="t-center" style="margin-top:6px">${code128Svg(inv.number, { height: 30, fontSize: 8 }).replace('class="bc"', 'class="bc" style="width:80%;height:12mm"')}</div>`;

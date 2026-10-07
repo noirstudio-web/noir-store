@@ -16,13 +16,22 @@ const POS = {
     const ex = this.cart.items.find(i => i.variantId === v.id);
     if (ex) ex.qty = round2(ex.qty + qty);
     else {
-      const promo = D.promoFor(p);
+      const price = this.priceFor(p, v), best = D.bestPromo(p, price, qty);
       this.cart.items.push({
-        key: uid(), variantId: v.id, productId: p.id, name: p.name, variant: D.vLabel(v), sku: v.sku,
-        qty, price: this.priceFor(p, v), discount: promo ? +promo.value : 0, promo: promo ? promo.name : '', cost: D.vCost(p, v), taxable: p.taxable !== false,
+        key: uid(), variantId: v.id, productId: p.id, name: p.name, variant: D.vLabel(v), sku: v.sku, auto: true,
+        qty, price, discount: best ? best.pct : 0, promo: best ? `${best.pr.name} (${D.promoShort(best.pr)})` : '', cost: D.vCost(p, v), taxable: p.taxable !== false,
       });
     }
     return true;
+  },
+  /* recalcula las ofertas automáticas (las de "lleva N y paga M" dependen de la cantidad) */
+  reprice() {
+    (this.cart.items || []).forEach(it => {
+      if (!it.auto || !it.productId) return;
+      const p = D.product(it.productId); if (!p) return;
+      const best = D.bestPromo(p, +it.price, +it.qty);
+      it.discount = best ? best.pct : 0; it.promo = best ? `${best.pr.name} (${D.promoShort(best.pr)})` : '';
+    });
   },
   loadQuote(id) {
     const q = DB.data.quotes.find(x => x.id === id); if (!q) return;
@@ -64,6 +73,7 @@ Pages.pos = {
         </div>
         <div class="cart-items" id="citems"></div>
         <div class="cart-foot">
+          ${LIC.has('promos') && (DB.data.promos || []).some(x => x.type === 'coupon') ? `<div class="row" style="margin-bottom:6px"><span class="small muted">${icon('gift', 13)} Cupón</span><span class="spacer"></span><div class="input-group" style="width:200px"><input id="coupon" placeholder="Código" style="text-transform:uppercase" value="${esc(c().coupon || '')}"><button class="btn sm" id="couponGo">${c().coupon ? 'Quitar' : 'Aplicar'}</button></div></div>` : ''}
           <div class="row"><span class="small muted">Descuento general</span><span class="spacer"></span>
             <div class="input-group" style="width:160px"><input id="gd" type="number" min="0" step="0.01" value="${c().gd || ''}" placeholder="0"><button class="btn sm" id="gdType" style="width:44px"></button></div></div>
           <div id="ctot"></div>
@@ -107,8 +117,9 @@ Pages.pos = {
         const state = st <= 0 ? 'out' : D.stockState(p) === 'low' ? 'low' : '';
         const prices = p.variants.map(v => POS.priceFor(p, v));
         const min = Math.min(...prices), max = Math.max(...prices);
+        const offer = D.promoBadge(p, min);
         return `<button class="p-card ${state === 'out' ? 'out' : ''}" data-p="${p.id}">
-          <div class="p-img">${p.image ? `<img src="${p.image}" alt="">` : `<span class="p-ini">${esc(initials(p.name))}</span>`}</div>
+          <div class="p-img">${offer ? `<span class="p-offer">${esc(offer)}</span>` : ''}${p.image ? `<img src="${p.image}" alt="">` : `<span class="p-ini">${esc(initials(p.name))}</span>`}</div>
           <div class="p-info"><div class="p-name">${esc(p.name)}</div>
           <div class="p-meta"><span class="p-price">${min !== max ? 'desde ' : ''}${money(min)}</span><span class="p-stock ${state}">${qtyFmt(Math.max(0, st))} ${p.variants.length > 1 ? `· ${p.variants.length} var.` : esc(p.unit || '')}</span></div></div>
         </button>`;
@@ -118,6 +129,7 @@ Pages.pos = {
     /* ----- Carrito ----- */
     const drawCart = () => {
       const cart = c();
+      POS.reprice();
       const cust = D.customer(cart.customerId) || D.customer('walkin');
       const bal = cust.id !== 'walkin' ? D.customerBalance(cust.id) : 0;
       $('#custSel', el).innerHTML = `<span class="avatar" style="width:32px;height:32px">${cust.id === 'walkin' ? icon('user', 16) : initials(cust.name)}</span>
@@ -225,7 +237,7 @@ Pages.pos = {
         if (it.variantId && !D.s.allowNegativeStock) { const fv = D.findVariant(it.variantId); const other = POS.cartQty(it.variantId) - it.qty; if (fv && other + v > fv.v.stock) { toast(`Máximo disponible: ${qtyFmt(fv.v.stock - other)}`, 'warn'); v = fv.v.stock - other; } }
         it.qty = v;
       } else if (f === 'discount') {
-        v = Math.min(100, Math.max(0, v));
+        v = Math.min(100, Math.max(0, v)); it.auto = false; it.promo = '';
         if (!isAdmin() && v > D.s.maxDiscountNonAdmin && !(await adminAuth(`Descuento mayor a ${D.s.maxDiscountNonAdmin}% requiere autorización.`))) v = 0;
         it.discount = v;
       } else if (f === 'price') {
@@ -249,6 +261,20 @@ Pages.pos = {
       drawChange(D.totals(c().items, c().gd, c().gdType).total);
     };
     $('#recvClear', el).onclick = () => { c().received = 0; $('#recv', el).value = ''; drawChange(D.totals(c().items, c().gd, c().gdType).total); $('#recv', el).focus(); };
+    const cg = $('#couponGo', el);
+    if (cg) {
+      const applyCoupon = () => {
+        const cart = c();
+        if (cart.coupon) { cart.coupon = ''; cart.gd = 0; cart.gdType = 'percent'; $('#gd', el).value = ''; $('#coupon', el).value = ''; cg.textContent = 'Aplicar'; toast('Cupón quitado'); return drawCart(); }
+        const r = D.couponFor($('#coupon', el).value, D.totals(cart.items).total);
+        if (r.error) return toast(r.error, 'warn');
+        cart.coupon = r.pr.code; cart.gd = +r.pr.value; cart.gdType = r.pr.ctype === 'amount' ? 'amount' : 'percent';
+        $('#gd', el).value = cart.gd; $('#coupon', el).value = r.pr.code; cg.textContent = 'Quitar';
+        toast(`Cupón ${r.pr.code} aplicado: ${D.promoShort(r.pr).replace('Cupón ', '')} de descuento`); drawCart();
+      };
+      cg.onclick = applyCoupon;
+      $('#coupon', el).addEventListener('keydown', e => { if (e.key === 'Enter') applyCoupon(); });
+    }
     $('#gdType', el).onclick =() => { c().gdType = c().gdType === 'percent' ? 'amount' : 'percent'; drawCart(); };
     $('#priceMode', el).onclick = e => {
       const b = e.target.closest('[data-m]'); if (!b) return;
@@ -526,7 +552,7 @@ async function checkout(after, opts = {}) {
     if (sl && sl.amount > sc + 0.004) return toast('El saldo a favor no alcanza', 'err');
     const args = {
       customerId: cust.id, items: cart.items.map(({ key, ...it }) => it), gd: cart.gd, gdType: cart.gdType, payments: lines,
-      notes: m.$('#pnotes').value.trim(), quoteId: cart.quoteId,
+      notes: [m.$('#pnotes').value.trim(), cart.coupon ? `Cupón ${cart.coupon}` : ''].filter(Boolean).join(' · '), quoteId: cart.quoteId,
       credit: credit ? creditArgs() : null,
     };
     let inv;
@@ -537,6 +563,7 @@ async function checkout(after, opts = {}) {
       } else return toast(err.message, 'err');
     }
     m.close();
+    if (cart.coupon) { const cp = (DB.data.promos || []).find(x => x.type === 'coupon' && x.code === cart.coupon); if (cp) { cp.uses = (cp.uses || 0) + 1; DB.commit(); } }
     POS.cart = POS.newCart();
     const gdIn = $('#gd'); if (gdIn) gdIn.value = '';
     after && after();

@@ -29,6 +29,7 @@ const TABLES = {
   expenses: ['expenses', { date: '$.date', category: '$.category', description: '$.description', amount: '$.amount', method: '$.method', voided: '$.voided' }],
   layaways: ['layaways', { number: '$.number', date: '$.date', customer_name: '$.customerName', total: '$.total', paid: '$.paid', balance: '$.balance', due_date: '$.dueDate', status: '$.status' }],
   promos: ['promos', { name: '$.name', value: '$.value', scope: '$.scope', date_from: '$.from', date_to: '$.to', active: '$.active' }],
+  warranties: ['warranties', { number: '$.number', date: '$.date', invoice_number: '$.invoiceNumber', customer_name: '$.customerName', item: '$.itemName', in_warranty: '$.inWarranty', valid_until: '$.until', status: '$.status', solution: '$.solution' }],
   held: ['held', { date: '$.date', user_name: '$.user' }],
   audit: ['audit', { date: '$.date', user_name: '$.userName', action: '$.action', detail: '$.detail' }],
   notifications: ['notifications', { date: '$.date', type: '$.type', ref: '$.ref', customer_name: '$.customerName', phone: '$.phone', status: '$.status' }],

@@ -12,11 +12,12 @@ const LIC_CFG = {
   trialDays: 7,          // días de prueba gratis antes de pedir el código (0 = sin prueba)
   warnDays: 7,           // avisar cuando falten estos días para vencer
   revocationUrl: '',     // dirección pública de la lista firmada de licencias desactivadas (opcional)
+  stateRepo: 'noirstudio-web/noir-activaciones',   // estado de las suscripciones (vencimiento y suspensión) que publica el panel
 };
 /* Funciones que un plan puede incluir o no (las define el código de activación) */
 const PLAN_FEATURES = {
   credits: 'Créditos y cobros', quotes: 'Cotizaciones', purchases: 'Compras y proveedores', reports: 'Reportes', whatsapp: 'Notificaciones por WhatsApp',
-  layaway: 'Apartados (plan separe)', loyalty: 'Programa de puntos', promos: 'Promociones automáticas', commissions: 'Comisiones de vendedores',
+  layaway: 'Apartados (plan separe)', loyalty: 'Programa de puntos', promos: 'Ofertas y descuentos automáticos', commissions: 'Comisiones de vendedores',
   ownerAlerts: 'Resúmenes al dueño por WhatsApp', branding: 'Logo propio en facturas', support: 'Soporte prioritario',
 };
 /* Beneficios añadidos después: los códigos Básica antiguos no los incluyen */
@@ -26,9 +27,9 @@ if (window.NOIR_PROVISION && NOIR_PROVISION.vendor) Object.assign(LIC_CFG, NOIR_
 /* Versión web pública (sin instalar): se entra solo con código de activación, sin prueba gratis */
 const LIC_WEB = location.protocol === 'https:' && !/^(localhost|127\.|\[::1\])/.test(location.hostname);
 if (LIC_WEB) LIC_CFG.trialDays = 0;
-/* Programa para computador: licencia permanente con número corto, sin prueba gratis */
+/* Programa para computador: número de licencia + suscripción que se verifica en internet; aviso 2 días antes de vencer */
 const LIC_APP = !!window.NOIR_SK;
-if (LIC_APP) LIC_CFG.trialDays = 0;
+if (LIC_APP) { LIC_CFG.trialDays = 0; LIC_CFG.warnDays = 2; }
 const PLAN_LIMITS = { basic: { u: 2, pr: 300, on: ['credits', 'quotes'] }, premium: { u: 0, pr: 0, on: Object.keys(PLAN_FEATURES) } };
 const LIC_PUBLIC_KEY ={ kty: 'EC', crv: 'P-256', x: 'hlLoieombQc23q161Ug5pdqRipCdcc9PYZ29S9ZphE4', y: '_7n-MORetUUTm3XvTDsomkSOkUkmh2O4N2LpYxaBURs' };
 
@@ -84,7 +85,6 @@ const LIC = {
   /* Estado actual: active | trial | expired | none | clock */
   status() {
     const d = DB.data, t = today();
-    if (this.valid && this.payload?.perpetual) return { state: 'active', perpetual: true, daysLeft: Infinity, plan: this.payload.p, business: this.payload.n };
     if (this.clockBack) return { state: 'clock' };
     if (this.valid && this.payload && d.license?.revoked) return { state: 'revoked', expires: this.payload.e, plan: this.payload.p, business: this.payload.n };
     if (this.valid && this.payload) {
@@ -139,19 +139,79 @@ const LIC = {
 
   /* Activa un código nuevo (o de renovación / restablecimiento de acceso) */
   shortPayload(r) {
-    return { k: r.key, tier: r.tier, p: 'Licencia ' + (r.tier === 'premium' ? 'Premium' : 'Básica'), n: DB.data.settings.company.name, perpetual: true, lim: PLAN_LIMITS[r.tier] };
+    const s = DB.data.license?.state || {};
+    return { k: r.key, tier: r.tier, p: 'Plan ' + (r.tier === 'premium' ? 'Premium' : 'Básica'), n: DB.data.settings.company.name, short: true, e: s.e, lim: PLAN_LIMITS[r.tier] };
   },
-  /* Activa el número de licencia permanente (sin internet) */
+  stateKey(k) { return sha256('noir-st|' + k).slice(0, 20); },
+  /* Estado firmado de las suscripciones (lo publica el panel en internet) */
+  async fetchState() {
+    const urls = [`https://api.github.com/repos/${LIC_CFG.stateRepo}/contents/estado.txt?ref=main&t=${Date.now()}`, `https://raw.githubusercontent.com/${LIC_CFG.stateRepo}/main/estado.txt?t=${Date.now()}`];
+    let online = false;
+    for (const u of urls) {
+      try {
+        const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 8000);
+        const r = await fetch(u, { cache: 'no-store', signal: ctl.signal }); clearTimeout(tm);
+        online = true;
+        if (!r.ok) continue;
+        let txt = await r.text();
+        if (u.includes('api.github.com')) txt = atob(JSON.parse(txt).content.replace(/\s/g, ''));
+        const p = this.parse(txt.trim());
+        if (p && p.payload.type === 'estado' && await this.verifySig(p)) return p.payload;
+      } catch (e) { }
+    }
+    throw new Error(online ? 'No se pudo leer el estado de tu suscripción. Inténtalo en unos minutos.' : 'offline');
+  },
+  applyState(st, key) {
+    const d = DB.data, row = (st.lic || {})[this.stateKey(key)];
+    if (!row) return null;
+    const [e, s] = row, cur = d.license.state || {};
+    if (cur.t && st.t < cur.t) return null;                       // nunca vuelve a un estado anterior
+    const changed = cur.e !== e || cur.s !== s;
+    d.license.state = { e, s, t: st.t, checkedAt: nowISO() };
+    d.license.revoked = s === 's';
+    if (changed && cur.e) audit(s === 's' ? 'Cuenta suspendida' : cur.s === 's' ? 'Cuenta reactivada' : 'Suscripción actualizada', `Por ${LIC_CFG.vendor} · vence ${fmtDate(e)}`);
+    this.payload = this.shortPayload(LicShort.check(window.NOIR_SK, key));
+    DB.commit();
+    return { e, s, changed };
+  },
+  /* Revisa en internet el vencimiento y si la cuenta fue suspendida (al abrir y cada hora) */
+  async refreshState() {
+    const d = DB.data;
+    if (!d.license?.short || !window.NOIR_SK) return false;
+    try { return !!this.applyState(await this.fetchState(), d.license.short)?.changed; } catch (e) { return false; }
+  },
+  /* Activa el número de licencia (la primera vez necesita internet para traer la suscripción) */
   async activateShort(code) {
     if (!window.NOIR_SK) throw new Error(`Este número de licencia se activa en el programa NOIR STORE para computador. Pide el enlace de descarga a ${LIC_CFG.vendor}.`);
     const r = LicShort.check(window.NOIR_SK, code);
     if (!r) throw new Error('Número de licencia inválido. Revísalo: son letras y números intercalados, por ejemplo NOIR-A1B2-C3D4-E5F6.');
-    const d = DB.data;
-    d.license = { short: r.key, tier: r.tier, activatedAt: nowISO() };
-    this.valid = true; this.payload = this.shortPayload(r);
-    audit('Activación de licencia', `${this.payload.p} · ${r.key}`);
+    let st;
+    try { st = await this.fetchState(); }
+    catch (e) { throw new Error(e.message === 'offline' ? 'Necesitas internet para activar tu licencia. Revisa tu conexión e inténtalo de nuevo.' : e.message); }
+    if (!(st.lic || {})[this.stateKey(r.key)]) throw new Error(`El número ${r.key} todavía no tiene una suscripción activa. Pide a ${LIC_CFG.vendor} que te la active.`);
+    const d = DB.data, prev = d.license;
+    d.license = { short: r.key, tier: r.tier, activatedAt: nowISO(), state: prev?.short ? prev.state : undefined };
+    const a = this.applyState(st, r.key) || { e: d.license.state.e, s: d.license.state.s };
+    this.valid = true;
+    audit('Activación de licencia', `${this.payload.p} · ${r.key} · vence ${fmtDate(a.e)}`);
     DB.commit(); await DB.persist();
+    if (a.s === 's') throw new Error(`Esta cuenta está suspendida. Comunícate con ${LIC_CFG.vendor}.`);
+    if (a.e < today()) throw new Error(`La suscripción de este número caducó el ${fmtDate(a.e)}. Renuévala con ${LIC_CFG.vendor}.`);
     return this.payload;
+  },
+  /* Aviso al entrar cuando faltan 2 días o menos para vencer */
+  warnSoon() {
+    const st = this.status();
+    if (st.state !== 'active' || !(st.daysLeft <= LIC_CFG.warnDays)) return;
+    const k = 'noir-aviso-' + today();
+    try { if (sessionStorage.getItem(k)) return; sessionStorage.setItem(k, '1'); } catch (e) { }
+    const cuando = st.daysLeft === 0 ? 'hoy' : st.daysLeft === 1 ? 'mañana' : `en ${st.daysLeft} días`;
+    const wa = this.contactLink('renovar mi suscripción');
+    openModal({
+      title: 'Tu suscripción está por vencer', size: 'sm',
+      body: `<div class="callout warn">${icon('alert', 16)} Tu suscripción ${esc(st.plan || '')} vence <b>${cuando}</b> (${fmtDate(st.expires)}).</div><p class="muted" style="margin-bottom:0">Renuévala con ${esc(LIC_CFG.vendor)} para no perder el acceso. Tus datos están a salvo.</p>`,
+      footer: `${wa ? `<a class="btn success" href="${wa}" target="_blank" rel="noopener">${waIcon(15)} Renovar por WhatsApp</a>` : ''}<button class="btn primary" data-close>Entendido</button>`,
+    });
   },
 
   async activate(code) {
@@ -168,7 +228,7 @@ const LIC = {
     const credsApplied = this.applyCredentials(pl);
     if (credsApplied) { audit('Acceso del administrador', `Usuario ${pl.u} configurado por ${LIC_CFG.vendor}`); DB.commit(); await DB.persist(); }
     if (d.license && d.license.short) {
-      if (!credsApplied) throw new Error('Tu licencia es permanente: no necesitas este código.');
+      if (!credsApplied) throw new Error('Tu licencia ya está activa: no necesitas este código.');
       return { ...this.payload, u: pl.u, credsOnly: true };
     }
     if (pl.e < today()) throw new Error(`Este código ya venció el ${fmtDate(pl.e)}.${credsApplied ? ` Tu usuario "${pl.u}" quedó configurado; pide a ${LIC_CFG.vendor} un código de renovación.` : ''}`);
@@ -253,12 +313,12 @@ async function applyProvision() {
 function activationScreen(onDone) {
   const st = LIC.status();
   const titles = {
-    none: LIC_APP ? ['Activa tu licencia', `Escribe el número de licencia que te entregó ${LIC_CFG.vendor}. Es para siempre: solo lo haces una vez.`] : ['Activa tu sistema', LIC_CFG.trialDays > 0 ? `Tu periodo de prueba terminó. Ingresa el código de activación que te entregó ${LIC_CFG.vendor}.` : `Bienvenido a NOIR STORE. Pega el código de activación que te entregó ${LIC_CFG.vendor}; después entras con tu usuario y contraseña.`],
-    expired: ['Suscripción vencida', `Tu suscripción venció el ${fmtDate(st.expires)}. Ingresa un código de renovación para continuar.`],
+    none: LIC_APP ? ['Activa tu licencia', `Escribe el número de licencia que te entregó ${LIC_CFG.vendor}. Necesitas internet solo para activarla.`] : ['Activa tu sistema', LIC_CFG.trialDays > 0 ? `Tu periodo de prueba terminó. Ingresa el código de activación que te entregó ${LIC_CFG.vendor}.` : `Bienvenido a NOIR STORE. Pega el código de activación que te entregó ${LIC_CFG.vendor}; después entras con tu usuario y contraseña.`],
+    expired: LIC.payload?.short ? ['Tu suscripción ha caducado', `Tu suscripción venció el ${fmtDate(st.expires)}. Renuévala con ${LIC_CFG.vendor} para seguir usando el sistema; tus datos están a salvo. Cuando renueves, toca “Ya renové”.`] : ['Suscripción vencida', `Tu suscripción venció el ${fmtDate(st.expires)}. Ingresa un código de renovación para continuar.`],
     clock: ['Revisa la fecha del equipo', 'La fecha de esta computadora es anterior a la última vez que se usó el sistema. Corrige la fecha y hora de Windows y vuelve a abrir el sistema.'],
     trial: ['Activa tu sistema', `Estás en periodo de prueba (${st.daysLeft} días restantes).`],
     active: ['Renovar suscripción', `Tu suscripción está activa hasta el ${fmtDate(st.expires)}.`],
-    revoked: ['Licencia desactivada', `${LIC_CFG.vendor} desactivó esta licencia. Comunícate para reactivarla; tus datos están a salvo.`],
+    revoked: [LIC.payload?.short ? 'Cuenta suspendida' : 'Licencia desactivada', `${LIC_CFG.vendor} ${LIC.payload?.short ? 'suspendió esta cuenta' : 'desactivó esta licencia'}. Comunícate para reactivarla; tus datos están a salvo.`],
   };
   const [title, msg0] = titles[st.state];
   const msg = DB.data.meta.provisionError && st.state !== 'active' ? `${msg0}<br><br><span class="warn-text">${esc(DB.data.meta.provisionError)}</span>` : msg0;
@@ -267,30 +327,37 @@ function activationScreen(onDone) {
     <div class="login">
       <div class="login-art"><img src="assets/logo-principal.png" alt="NOIR"><div class="tagline">Sistema de gestión comercial</div></div>
       <div class="login-form"><div class="login-box" style="max-width:440px">
-        <div class="badge ${['clock', 'expired', 'revoked'].includes(st.state) ? 'err' : 'warn'}" style="margin-bottom:14px">${icon('lock', 12)} ${{ clock: 'Fecha incorrecta', expired: 'Vencida', revoked: 'Desactivada' }[st.state] || 'Sin activar'}</div>
+        <div class="badge ${['clock', 'expired', 'revoked'].includes(st.state) ? 'err' : 'warn'}" style="margin-bottom:14px">${icon('lock', 12)} ${{ clock: 'Fecha incorrecta', expired: LIC.payload?.short ? 'Caducada' : 'Vencida', revoked: LIC.payload?.short ? 'Suspendida' : 'Desactivada' }[st.state] || 'Sin activar'}</div>
         <h2>${title}</h2><p>${msg}</p>
         ${st.state === 'clock' ? '' : `
         ${LIC.key() ? `<div class="field mb"><label>Tu código de licencia</label>
           <div class="input-group"><input id="ac-id" value="${esc(LIC.key())}" readonly style="font-family:monospace;letter-spacing:.08em"><button class="btn" id="ac-copy" title="Copiar">${icon('copy', 15)}</button></div>
           <span class="hint">Indícaselo a ${esc(LIC_CFG.vendor)} para renovar o reactivar.</span></div>` : ''}
         ${LIC_APP ? '<div class="field"><label>Número de licencia</label><input id="ac-code" placeholder="NOIR-A1B2-C3D4-E5F6" autocapitalize="characters" autocomplete="off" spellcheck="false" style="font-family:monospace;font-size:19px;letter-spacing:.08em;text-align:center"></div>' : '<div class="field"><label>Código de activación</label><textarea id="ac-code" rows="4" placeholder="NOIR1.xxxxxxxx…" style="font-family:monospace;font-size:12px;word-break:break-all"></textarea></div>'}
+        ${LIC_APP && st.state === 'none' ? `<label class="check small mt" style="align-items:flex-start"><input type="checkbox" id="ac-legal"> <span>Acepto los <a href="#" data-legal="terms">Términos y condiciones</a> y la <a href="#" data-legal="privacy">Política de privacidad</a></span></label>` : ''}
         <button class="btn chrome lg block mt" id="ac-go">${icon('unlock', 18)} Activar</button>`}
         <div class="row mt" style="justify-content:center">
           ${wa ? `<a class="btn ghost" href="${wa}" target="_blank" rel="noopener">${waIcon(15)} Contactar a ${esc(LIC_CFG.vendor)}</a>` : ''}
+          ${LIC.payload?.short && ['expired', 'revoked'].includes(st.state) ? `<button class="btn" id="ac-recheck">${icon('undo', 15)} Ya renové · verificar</button>` : ''}
           <button class="btn ghost" id="ac-bk">${icon('download', 15)} Descargar mis datos</button>
           ${st.state === 'trial' || st.state === 'active' ? `<button class="btn ghost" id="ac-back">Volver</button>` : ''}
         </div>
       </div></div>
     </div>`;
   const cp = $('#ac-copy'); if (cp) cp.onclick = () => { navigator.clipboard?.writeText(LIC.key()); $('#ac-id').select(); document.execCommand?.('copy'); toast('Código de licencia copiado'); };
+  const rc = $('#ac-recheck'); if (rc) rc.onclick = async () => { rc.disabled = true; await LIC.refreshState(); if (LIC.usable()) { toast('¡Listo! Tu suscripción está activa', 'ok', 5000); onDone(true); } else { toast(navigator.onLine ? 'Todavía no aparece la renovación. Si ya pagaste, espera unos minutos y vuelve a intentar.' : 'Sin conexión a internet', 'warn', 7000); rc.disabled = false; } };
   $('#ac-bk').onclick = () => downloadFile(`noir-store-respaldo-${today()}.json`, JSON.stringify(DB.data), 'application/json');
   const back = $('#ac-back'); if (back) back.onclick = () => onDone(false);
+  $('#root').querySelectorAll('[data-legal]').forEach(a => a.onclick = e => { e.preventDefault(); legalModal(a.dataset.legal); });
   const go = $('#ac-go');
   if (go) go.onclick = async () => {
+    const lg = $('#ac-legal');
+    if (lg && !lg.checked) return toast('Para activar debes aceptar los Términos y condiciones y la Política de privacidad', 'warn', 6000);
+    if (lg) { DB.data.meta.legalAccepted = { version: LEGAL.version, at: nowISO() }; DB.commit(); }
     go.disabled = true;
     try {
       const pl = await LIC.activate($('#ac-code').value);
-      toast(pl.perpetual ? `¡${pl.p} activada!` : `¡Sistema activado hasta el ${fmtDate(pl.e)}!`, 'ok', 5000);
+      toast(pl.short ? `¡${pl.p} activado! Vence el ${fmtDate(pl.e)}` : `¡Sistema activado hasta el ${fmtDate(pl.e)}!`, 'ok', 5000);
       onDone(true, pl);
     } catch (e) { toast(e.message, 'err', 6000); go.disabled = false; }
   };

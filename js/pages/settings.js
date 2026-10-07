@@ -106,7 +106,7 @@ Pages.settings = {
   tab: 'company',
   render(el) {
     const s = D.s;
-    const tabs = [['company', 'Empresa'], ['sales', 'Ventas e impuestos'], ['docs', 'Documentos'], ['loyalty', 'Puntos y apartados'], ['whatsapp', 'WhatsApp'], ['account', 'Mi cuenta'], ['users', 'Usuarios'], ['license', LIC.payload?.perpetual || LIC_APP ? 'Licencia' : 'Suscripción'], ['catalogs', 'Catálogos'], ['backup', 'Respaldo y datos'], ['sql', 'Base de datos SQL'], ['audit', 'Bitácora']];
+    const tabs = [['company', 'Empresa'], ['sales', 'Ventas e impuestos'], ['docs', 'Documentos'], ['loyalty', 'Puntos y apartados'], ['whatsapp', 'WhatsApp'], ['account', 'Mi cuenta'], ['users', 'Usuarios'], ['license', 'Suscripción'], ['catalogs', 'Catálogos'], ['backup', 'Respaldo y datos'], ['legal', 'Términos y privacidad'], ['sql', 'Base de datos SQL'], ['audit', 'Bitácora']];
     el.innerHTML = `<div class="tabs">${tabs.map(([k, l]) => `<button class="tab ${this.tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div><div id="body"></div>`;
     $$('[data-tab]', el).forEach(b => b.onclick = () => { this.tab = b.dataset.tab; this.render(el); });
     const body = $('#body', el);
@@ -195,13 +195,16 @@ Pages.settings = {
           <div class="field span-2"><label class="check"><input type="checkbox" name="autoPrint" ${s.autoPrint ? 'checked' : ''}> Imprimir automáticamente al completar una venta</label></div>
           <div class="field span-2"><label>Pie del ticket</label><textarea name="ticketFooter" rows="3">${esc(s.ticketFooter)}</textarea></div></div></div>
         <div class="card card-pad"><div class="field"><label>Términos en facturas</label><textarea name="invoiceTerms" rows="4">${esc(s.invoiceTerms)}</textarea></div></div>
+        <div class="card card-pad"><h3 style="margin:0 0 14px;font:600 15px var(--display)">${icon('check', 16)} Garantía</h3><div class="form-grid">
+          <div class="field"><label>Garantía general (días)</label><input name="warrantyDays" type="number" min="0" step="1" value="${s.warrantyDays ?? 0}"><span class="hint">Para productos sin garantía propia. 0 = sin garantía.</span></div>
+          <div class="field span-2"><label>Condiciones de la garantía (salen en la factura y en el comprobante)</label><textarea name="warrantyTerms" rows="4">${esc(s.warrantyTerms || '')}</textarea></div></div></div>
         <div class="card card-pad"><div class="field"><label>Términos en cotizaciones</label><textarea name="quoteTerms" rows="4">${esc(s.quoteTerms)}</textarea></div></div>
         </div>${saveBar}`;
       $('#save', body).onclick = () => {
         const f = readForm(body);
         $$('[data-pre]', body).forEach(i => P[i.dataset.pre] = i.value.trim() || P[i.dataset.pre]);
         $$('[data-seq]', body).forEach(i => Q[i.dataset.seq] = Math.max(1, Math.round(num(i.value))));
-        Object.assign(s, { defaultPrint: f.defaultPrint, ticketWidth: +f.ticketWidth, autoPrint: f.autoPrint, ticketFooter: f.ticketFooter, invoiceTerms: f.invoiceTerms, quoteTerms: f.quoteTerms });
+        Object.assign(s, { defaultPrint: f.defaultPrint, ticketWidth: +f.ticketWidth, autoPrint: f.autoPrint, ticketFooter: f.ticketFooter, invoiceTerms: f.invoiceTerms, quoteTerms: f.quoteTerms, warrantyDays: Math.max(0, Math.round(num(f.warrantyDays))), warrantyTerms: f.warrantyTerms });
         audit('Configuración', 'Documentos actualizados'); DB.commit(); toast('Configuración guardada');
       };
     }
@@ -345,18 +348,28 @@ Pages.settings = {
           </div>
           <div class="row mt">${wa ? `<a class="btn success" href="${wa}" target="_blank" rel="noopener">${waIcon(15)} Pedir renovación por WhatsApp</a>` : ''}
           ${lim.tier === 'basic' && LIC_CFG.whatsapp ? `<a class="btn" href="${LIC.contactLink('mejorar mi plan a Premium')}" target="_blank" rel="noopener">${icon('up', 15)} Mejorar a Premium</a>` : ''}</div></div>
-        <div class="card card-pad"><h3 style="margin:0 0 6px;font:600 15px var(--display)">${st.perpetual ? 'Cambiar a otro plan' : 'Ingresar código de activación'}</h3>
-          <p class="muted small" style="margin-top:0">${st.perpetual ? `¿Compraste ${lim.tier === 'basic' ? 'Premium' : 'otra licencia'}? Escribe aquí el número nuevo que te entregó ${esc(LIC_CFG.vendor)}. Si te enviaron un código para restablecer tu contraseña, pégalo aquí.` : 'Pega el código de renovación o de restablecimiento de acceso que te enviaron.'}</p>
-          <textarea id="lic-code" rows="${st.perpetual ? 2 : 5}" placeholder="${st.perpetual ? 'NOIR-A1B2-C3D4-E5F6' : 'NOIR1.xxxxxxxx…'}" style="font-family:monospace;font-size:${st.perpetual ? 16 : 12}px;word-break:break-all"></textarea>
-          <button class="btn primary mt" id="lic-go">${icon('unlock', 15)} Activar código</button></div></div>`;
+        <div class="card card-pad"><h3 style="margin:0 0 6px;font:600 15px var(--display)">${LIC.payload?.short ? 'Cambiar de plan o restablecer acceso' : 'Ingresar código de activación'}</h3>
+          <p class="muted small" style="margin-top:0">${LIC.payload?.short ? `Las renovaciones se aplican solas cuando hay internet. ¿Te pasaste a ${lim.tier === 'basic' ? 'Premium' : 'otro plan'}? Escribe aquí el número nuevo que te entregó ${esc(LIC_CFG.vendor)}. Si te enviaron un código para restablecer tu contraseña, pégalo aquí.` : 'Pega el código de renovación o de restablecimiento de acceso que te enviaron.'}</p>
+          <textarea id="lic-code" rows="${LIC.payload?.short ? 2 : 5}" placeholder="${LIC.payload?.short ? 'NOIR-A1B2-C3D4-E5F6' : 'NOIR1.xxxxxxxx…'}" style="font-family:monospace;font-size:${LIC.payload?.short ? 16 : 12}px;word-break:break-all"></textarea>
+          <div class="row mt"><button class="btn primary" id="lic-go">${icon('unlock', 15)} Activar código</button>${LIC.payload?.short ? `<button class="btn ghost" id="lic-check">${icon('undo', 15)} Verificar suscripción ahora</button>` : ''}</div></div></div>`;
+      const lc = $('#lic-check', body); if (lc) lc.onclick = async () => { lc.disabled = true; const ch = await LIC.refreshState(); toast(ch ? 'Suscripción actualizada' : navigator.onLine ? `Tu suscripción está al día: vence el ${fmtDate(LIC.status().expires)}` : 'Sin conexión a internet', ch ? 'ok' : 'info', 5000); reload(); App.licPill(); };
       $('#lic-go', body).onclick = async () => {
         try {
           const pl2 = await LIC.activate($('#lic-code', body).value);
-          toast(pl2.credsOnly ? 'Usuario y contraseña restablecidos' : pl2.perpetual ? `¡${pl2.p} activada!` : `Suscripción activa hasta el ${fmtDate(pl2.e)}`, 'ok', 5000);
+          toast(pl2.credsOnly ? 'Usuario y contraseña restablecidos' : pl2.short ? `¡${pl2.p} activado!` : `Suscripción activa hasta el ${fmtDate(pl2.e)}`, 'ok', 5000);
           if (pl2.u) { toast('Se actualizaron las credenciales del administrador. Vuelve a iniciar sesión.', 'info', 6000); setTimeout(() => App.logout(), 1500); }
           else { reload(); App.licPill(); }
         } catch (e) { toast(e.message, 'err', 6000); }
       };
+    }
+
+    else if (this.tab === 'legal') {
+      const acc = DB.data.meta.legalAccepted;
+      body.innerHTML = `<div class="card card-pad">
+        <div class="row mb"><div class="seg" id="lg-seg"><button data-lg="terms" class="on">Términos y condiciones</button><button data-lg="privacy">Política de privacidad</button></div><span class="spacer"></span>
+          <span class="small muted">${acc ? `Aceptados el ${fmtDate(acc.at)} · versión ${esc(acc.version)}` : `Versión ${esc(LEGAL.version)}`}</span></div>
+        <div class="legal-doc" id="lg-doc">${LEGAL.terms}</div></div>`;
+      $('#lg-seg', body).onclick = e => { const b = e.target.closest('[data-lg]'); if (!b) return; $('#lg-doc', body).innerHTML = LEGAL[b.dataset.lg]; $$('#lg-seg button', body).forEach(x => x.classList.toggle('on', x === b)); };
     }
 
     else if (this.tab === 'users') {

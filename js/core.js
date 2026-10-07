@@ -276,7 +276,7 @@ const IDB = {
 };
 
 const COLLECTIONS = ['users', 'categories', 'brands', 'products', 'movements', 'customers', 'suppliers', 'purchases',
-  'supplierPayments', 'quotes', 'invoices', 'payments', 'returns', 'cashSessions', 'cashMoves', 'expenses', 'held', 'audit', 'notifications', 'layaways', 'promos'];
+  'supplierPayments', 'quotes', 'invoices', 'payments', 'returns', 'cashSessions', 'cashMoves', 'expenses', 'held', 'audit', 'notifications', 'layaways', 'promos', 'warranties'];
 
 const DB = {
   data: null,
@@ -364,8 +364,10 @@ const DEFAULT_SETTINGS = () => ({
   quoteTerms: 'Precios sujetos a cambio sin previo aviso. Cotización válida hasta la fecha indicada.',
   quoteValidityDays: 15, creditDefaultDays: 30, lowStockDefault: 3,
   allowNegativeStock: false, requireCashSession: true, sellerCanEditPrice: false, maxDiscountNonAdmin: 15,
-  prefixes: { invoice: 'FAC', quote: 'COT', purchase: 'OC', return: 'DEV', receipt: 'REC', supplierPayment: 'PP', session: 'CJ', layaway: 'APA' },
-  seq: { invoice: 1, quote: 1, purchase: 1, return: 1, receipt: 1, supplierPayment: 1, session: 1, sku: 1, barcode: 1, layaway: 1 },
+  prefixes: { invoice: 'FAC', quote: 'COT', purchase: 'OC', return: 'DEV', receipt: 'REC', supplierPayment: 'PP', session: 'CJ', layaway: 'APA', warranty: 'GAR' },
+  seq: { invoice: 1, quote: 1, purchase: 1, return: 1, receipt: 1, supplierPayment: 1, session: 1, sku: 1, barcode: 1, layaway: 1, warranty: 1 },
+  warrantyDays: 30,
+  warrantyTerms: 'La garantía cubre defectos de fabricación durante el tiempo indicado en la factura, presentando la factura y el producto en buen estado. No cubre daños por mal uso, accidentes, lavado o cuidado inadecuado, ni desgaste normal.',
   sizes: ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
   colors: ['Negro', 'Blanco', 'Gris', 'Azul', 'Beige', 'Rojo'],
   units: ['und', 'par', 'docena', 'caja', 'kg', 'm'],
@@ -422,8 +424,8 @@ function migrate(d) {
 /* ---------- Roles y permisos ---------- */
 const ROLES = {
   admin: { label: 'Administrador', perms: '*' },
-  cajero: { label: 'Cajero', perms: ['dashboard', 'pos', 'invoices', 'quotes', 'customers', 'customers.edit', 'credits', 'cash', 'expenses', 'products', 'inventory', 'returns', 'layaway'] },
-  vendedor: { label: 'Vendedor', perms: ['dashboard', 'pos', 'quotes', 'customers', 'customers.edit', 'products', 'layaway'] },
+  cajero: { label: 'Cajero', perms: ['dashboard', 'pos', 'invoices', 'quotes', 'customers', 'customers.edit', 'credits', 'cash', 'expenses', 'products', 'inventory', 'returns', 'layaway', 'warranty'] },
+  vendedor: { label: 'Vendedor', perms: ['dashboard', 'pos', 'quotes', 'customers', 'customers.edit', 'products', 'layaway', 'warranty'] },
   almacen: { label: 'Almacén', perms: ['dashboard', 'products', 'products.edit', 'inventory', 'inventory.adjust', 'purchases'] },
 };
 function can(perm) {

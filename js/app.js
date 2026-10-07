@@ -13,8 +13,10 @@ const NAV = [
   { id: 'layaway', label: 'Apartados', icon: 'tag', badge: () => DB.data.layaways.filter(l => D.layawayStatus(l) === 'vencido').length },
   { id: 'customers', label: 'Clientes', icon: 'users' },
   { id: 'credits', label: 'Créditos y cobros', icon: 'credit', badge: () => DB.data.invoices.filter(i => D.overdueDays(i) > 0).length },
+  { id: 'warranty', label: 'Garantías', icon: 'check', badge: () => (DB.data.warranties || []).filter(w => ['recibida', 'revision'].includes(w.status)).length },
   { section: 'Inventario' },
   { id: 'products', label: 'Productos', icon: 'box' },
+  { id: 'promos', label: 'Ofertas y descuentos', icon: 'gift' },
   { id: 'inventory', label: 'Inventario', icon: 'layers', badge: () => DB.data.products.filter(p => p.active !== false && D.stockState(p) !== 'ok').length },
   { id: 'purchases', label: 'Compras y proveedores', icon: 'truck' },
   { section: 'Finanzas' },
@@ -60,6 +62,7 @@ const App = {
     let linkResult = null;
     try {
       await DB.load(); await applyProvision(); await LIC.init();
+      if (DB.data.license?.short) await Promise.race([LIC.refreshState(), new Promise(r => setTimeout(r, 6000))]);   // suspensión / renovación al abrir
       const linkCode = new URLSearchParams(location.search).get('activar');
       if (linkCode) {
         history.replaceState(null, '', location.pathname + location.hash);   // el código no queda en la barra de direcciones
@@ -79,8 +82,9 @@ const App = {
     // revisa la suscripción cada 30 minutos (por si vence con el sistema abierto)
     setInterval(() => { if (!LIC.usable() && !$('#ac-code')) this.gate(); }, 30 * 60 * 1000);
     // lista de licencias desactivadas: al iniciar y cada 6 horas (si hay internet)
-    const rev = () => LIC.checkRevocation().then(() => { if (!LIC.usable() && !$('#ac-code')) this.gate(); });
-    setInterval(rev, 6 * 3600 * 1000);
+    // suspensión, renovación y lista de desactivadas: al abrir y cada hora (si hay internet)
+    const rev = () => Promise.all([LIC.checkRevocation(), LIC.refreshState()]).then(() => { if (!LIC.usable() && !$('#ac-code')) this.gate(); else this.licPill(); });
+    setInterval(rev, 3600 * 1000);
     this.gate();
     if (linkResult?.pl) toast(`¡Listo! Tu sistema quedó activado hasta el ${fmtDate(linkResult.pl.e)}.${linkResult.pl.u && !this.user ? ' Ahora entra con tu usuario y contraseña.' : ''}`, 'ok', 8000);
     else if (linkResult?.error) toast(linkResult.error, 'err', 9000);
@@ -89,7 +93,7 @@ const App = {
   /* Bloquea con la pantalla de activación si la suscripción no está vigente */
   gate() {
     if (!LIC.usable()) { this.user = null; sessionStorage.removeItem('noir-user'); activationScreen(() => this.gate()); return; }
-    if (LIC.payload?.perpetual && needsOwner()) { ownerScreen(() => this.gate()); return; }
+    if (LIC.payload?.short && needsOwner()) { ownerScreen(() => this.gate()); return; }
     this.user ? this.shell() : this.login();
   },
 
@@ -126,7 +130,7 @@ const App = {
           ${defaultCreds ? '<p class="small muted center" style="margin-top:16px">Primer acceso: usuario <b>admin</b>, contraseña <b>1234</b>. Cámbiala en Mi cuenta.</p>' : ''}`}
           ${DB.data.meta.provisionError && st.state !== 'active' ? `<div class="callout warn small" style="margin-top:14px">${esc(DB.data.meta.provisionError)}</div>` : ''}
           <div class="small muted center" style="margin-top:18px">${st.state === 'trial' ? `<span class="badge warn">Prueba gratis · ${st.daysLeft} día(s)</span> <a href="#" id="lg-act">Activar ahora</a>` : st.state === 'active' ? (st.perpetual ? `${esc(st.plan)} · permanente` : `Suscripción activa hasta ${fmtDate(st.expires)}`) : ''}</div>
-          <p class="small muted center" style="margin-top:10px">${LIC.payload?.perpetual ? `<a href="#" id="lg-forgot">¿Olvidaste tu contraseña?</a>` : `¿Olvidaste tu ${mode === 'pin' ? 'PIN' : 'contraseña'}? Pide a un administrador que la restablezca${LIC_CFG.vendor ? ` o contacta a ${esc(LIC_CFG.vendor)}` : ''}.`}</p>
+          <p class="small muted center" style="margin-top:10px">${LIC.payload?.short ? `<a href="#" id="lg-forgot">¿Olvidaste tu contraseña?</a>` : `¿Olvidaste tu ${mode === 'pin' ? 'PIN' : 'contraseña'}? Pide a un administrador que la restablezca${LIC_CFG.vendor ? ` o contacta a ${esc(LIC_CFG.vendor)}` : ''}.`}</p>
         </div></div>
       </div>`;
     $$('[data-mode]').forEach(b => b.onclick = () => { try { localStorage.setItem('noir-login-mode', b.dataset.mode); } catch (e) { } this.login(b.dataset.mode); });
@@ -222,6 +226,7 @@ const App = {
     tick(); clearInterval(this._clock); this._clock = setInterval(tick, 20000);
     this.route();
     if (!DB.data.settings.setupDone && isAdmin()) setupWizard();
+    else LIC.warnSoon();
   },
   navHTML() {
     let html = '', pendingSection = null;

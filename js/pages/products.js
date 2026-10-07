@@ -82,6 +82,7 @@ function productForm(existing, onSaved, template = null) {
         <div class="field"><label>Proveedor</label><select name="supplierId"><option value="">—</option>${DB.data.suppliers.map(c => opt(c.id, c.name, p.supplierId)).join('')}</select></div>
         <div class="field"><label>Unidad</label><select name="unit">${s.units.map(u => opt(u, u, p.unit)).join('')}</select></div>
         <div class="field"><label>Stock mínimo</label><input name="minStock" type="number" min="0" value="${p.minStock}" placeholder="${s.lowStockDefault}"></div>
+        <div class="field"><label>Garantía (días)</label><input name="warrantyDays" type="number" min="0" step="1" value="${p.warrantyDays ?? ''}" placeholder="${s.warrantyDays || 0} (general)" title="Vacío = usa la garantía general de Configuración → Documentos. 0 = sin garantía."></div>
         <div class="field" style="justify-content:flex-end"><label class="check"><input type="checkbox" name="taxable" ${p.taxable !== false ? 'checked' : ''}> Aplica ${esc(s.taxName)}</label><label class="check"><input type="checkbox" name="active" ${p.active !== false ? 'checked' : ''}> Activo</label></div>
         <div class="field span-all"><label>Descripción</label><input name="description" value="${esc(p.description)}" placeholder="Material, detalles, notas…"></div>
       </div></div>
@@ -293,7 +294,7 @@ Pages.products = {
     const edit = can('products.edit');
     const st = { cat: '', status: 'activos' };
     el.innerHTML = `<div class="page-head"><div class="muted">${DB.data.products.length} productos · ${D.vmap().size} variantes</div><span class="spacer"></span>
-      ${edit && can('promos') ? `<button class="btn" id="promos">${icon('tag', 16)} Promociones <span class="badge info">${(DB.data.promos || []).filter(p => p.active && (!p.to || p.to >= today())).length}</span></button>` : ''}
+      ${edit && can('promos') ? `<button class="btn" id="promos">${icon('gift', 16)} Ofertas <span class="badge info">${(DB.data.promos || []).filter(p => p.active && (!p.to || p.to >= today())).length}</span></button>` : ''}
       ${edit ? `<button class="btn" id="imp">${icon('upload', 16)} Importar CSV</button>` : ''}
       <button class="btn" id="exp">${icon('download', 16)} Exportar</button>
       ${edit ? `<button class="btn primary" id="new">${icon('plus', 16)} Nuevo producto</button>` : ''}</div><div id="tbl"></div>`;
@@ -319,7 +320,7 @@ Pages.products = {
     $('#f-cat', el).onchange = e => { st.cat = e.target.value; dt.refresh(); };
     $('#f-st', el).onchange = e => { st.status = e.target.value; dt.refresh(); };
     $('#exp', el).onclick = exportProductsCSV;
-    const pb = $('#promos', el); if (pb) pb.onclick = () => promosModal(() => App.route());
+    const pb = $('#promos', el); if (pb) pb.onclick = () => { location.hash = '#/promos'; };
     if (edit) {
       $('#new', el).onclick = () => productForm(null, () => dt.refresh());
       $('#imp', el).onclick = () => openModal({
@@ -539,51 +540,3 @@ Pages.inventory = {
   },
 };
 
-/* ---------- Promociones automáticas (beneficio Premium) ---------- */
-function promosModal(onDone) {
-  const scopeLabel = p => p.scope === 'all' ? 'Toda la tienda' : p.scope === 'category' ? 'Categoría: ' + (D.category(p.targetId)?.name || '—') : 'Producto: ' + (D.product(p.targetId)?.name || '—');
-  const m = openModal({
-    title: 'Promociones automáticas', size: 'lg',
-    body: `<p class="muted small" style="margin-top:0">Los descuentos se aplican solos en el punto de venta mientras la promoción esté vigente. Si un producto tiene varias, se usa la mayor.</p>
-      <div class="card mb"><div class="card-body"><div class="form-grid c4">
-        <div class="field span-2"><label>Nombre</label><input id="pr-n" placeholder="Ej. Black Friday, Temporada de jeans"></div>
-        <div class="field"><label>Descuento (%)</label><input id="pr-v" type="number" min="1" max="90" value="10"></div>
-        <div class="field"><label>Aplica a</label><select id="pr-s">${opt('all', 'Toda la tienda')}${opt('category', 'Una categoría')}${opt('product', 'Un producto')}</select></div>
-        <div class="field span-2" id="pr-tw"><label>Categoría / producto</label><select id="pr-t"></select></div>
-        <div class="field"><label>Desde</label><input id="pr-f" type="date" value="${today()}"></div>
-        <div class="field"><label>Hasta</label><input id="pr-to" type="date" value="${addDays(today(), 7)}"></div>
-      </div><div class="row end mt"><button class="btn primary" id="pr-add">${icon('plus', 15)} Crear promoción</button></div></div></div>
-      <div id="pr-list"></div>`,
-    footer: `<button class="btn primary" data-close>Listo</button>`,
-    onClose: onDone,
-  });
-  const fillTargets = () => {
-    const s = m.$('#pr-s').value;
-    m.$('#pr-tw').style.visibility = s === 'all' ? 'hidden' : 'visible';
-    m.$('#pr-t').innerHTML = s === 'category' ? DB.data.categories.map(c => opt(c.id, c.name)).join('') : s === 'product' ? DB.data.products.filter(p => p.active !== false).map(p => opt(p.id, p.name)).join('') : '';
-  };
-  const draw = () => {
-    const t = today();
-    m.$('#pr-list').innerHTML = `<table class="tbl compact"><thead><tr><th>Promoción</th><th>Aplica a</th><th class="num">Desc.</th><th>Vigencia</th><th>Estado</th><th></th></tr></thead><tbody>${(DB.data.promos || []).slice().reverse().map(p => {
-      const live = p.active && (!p.from || p.from <= t) && (!p.to || p.to >= t);
-      return `<tr><td class="strong">${esc(p.name)}</td><td>${esc(scopeLabel(p))}</td><td class="num">${p.value}%</td><td class="small">${fmtDate(p.from)} → ${fmtDate(p.to)}</td>
-        <td>${live ? '<span class="badge ok">Vigente</span>' : !p.active ? '<span class="badge">Pausada</span>' : p.to && p.to < t ? '<span class="badge">Terminada</span>' : '<span class="badge info">Programada</span>'}</td>
-        <td class="actions"><button class="btn sm" data-tg="${p.id}">${p.active ? 'Pausar' : 'Activar'}</button><button class="icon-btn danger" data-rm="${p.id}">${icon('trash', 14)}</button></td></tr>`;
-    }).join('') || '<tr><td colspan="6"><div class="empty">Aún no hay promociones</div></td></tr>'}</tbody></table>`;
-  };
-  fillTargets(); draw();
-  m.$('#pr-s').onchange = fillTargets;
-  m.$('#pr-add').onclick = () => {
-    const name = m.$('#pr-n').value.trim(), value = num(m.$('#pr-v').value), scope = m.$('#pr-s').value;
-    if (!name) return toast('Ponle un nombre a la promoción', 'warn');
-    if (!(value > 0 && value <= 90)) return toast('El descuento debe estar entre 1% y 90%', 'warn');
-    if (scope !== 'all' && !m.$('#pr-t').value) return toast('Elige a qué aplica', 'warn');
-    DB.data.promos.push({ id: uid(), name, value, scope, targetId: scope === 'all' ? '' : m.$('#pr-t').value, from: m.$('#pr-f').value, to: m.$('#pr-to').value, active: true, createdAt: nowISO() });
-    audit('Promoción creada', `${name} · ${value}%`); DB.commit(); m.$('#pr-n').value = ''; draw(); toast('Promoción creada');
-  };
-  m.el.addEventListener('click', e => {
-    const tg = e.target.closest('[data-tg]'), rm = e.target.closest('[data-rm]');
-    if (tg) { const p = DB.data.promos.find(x => x.id === tg.dataset.tg); p.active = !p.active; DB.commit(); draw(); }
-    if (rm) { DB.data.promos = DB.data.promos.filter(x => x.id !== rm.dataset.rm); DB.commit(); draw(); }
-  });
-}

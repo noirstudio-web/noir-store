@@ -327,17 +327,72 @@ const D = {
   loyaltyOn() { return this.s.loyalty.enabled && typeof LIC !== 'undefined' && LIC.has('loyalty'); },
   pointsMoney(points) { return round2((points || 0) * this.s.loyalty.pointValue); },
 
-  /* ---------- Promociones automáticas ---------- */
-  promoFor(p) {
+  /* ---------- Ofertas y descuentos automáticos ---------- */
+  promoLive(pr, t = today()) {
+    if (!pr.active || (pr.from && t < pr.from) || (pr.to && t > pr.to)) return false;
+    if (pr.days && pr.days.length && !pr.days.includes(new Date().getDay())) return false;
+    if (pr.type === 'coupon' && pr.maxUses && (pr.uses || 0) >= pr.maxUses) return false;
+    return true;
+  },
+  promoApplies(pr, p) { return pr.scope === 'all' || (pr.scope === 'category' && pr.targetId === p.categoryId) || (pr.scope === 'product' && pr.targetId === p.id); },
+  /* % equivalente de una oferta para una línea (según precio y cantidad) */
+  promoPct(pr, price, qty = 1) {
+    const type = pr.type || 'pct';
+    if (!(price > 0)) return 0;
+    if (type === 'pct') return Math.min(100, +pr.value || 0);
+    if (type === 'amount') return Math.min(100, (+pr.value || 0) / price * 100);
+    if (type === 'price') return +pr.value < price ? (price - +pr.value) / price * 100 : 0;
+    if (type === 'nxm') { const n = +pr.buy, m = +pr.pay; if (!(n > m && m >= 1) || qty < n) return 0; return Math.floor(qty / n) * (n - m) / qty * 100; }
+    return 0;
+  },
+  /* la oferta que más le conviene al cliente para ese producto y cantidad */
+  bestPromo(p, price, qty = 1) {
     if (typeof LIC === 'undefined' || !LIC.has('promos') || !p) return null;
-    const t = today(); let best = null;
+    let best = null;
     (DB.data.promos || []).forEach(pr => {
-      if (!pr.active || (pr.from && t < pr.from) || (pr.to && t > pr.to)) return;
-      const ok = pr.scope === 'all' || (pr.scope === 'category' && pr.targetId === p.categoryId) || (pr.scope === 'product' && pr.targetId === p.id);
-      if (ok && (!best || +pr.value > +best.value)) best = pr;
+      if (pr.type === 'coupon' || !this.promoLive(pr) || !this.promoApplies(pr, p)) return;
+      const pct = this.promoPct(pr, price, qty);
+      if (pct > 0 && (!best || pct > best.pct)) best = { pr, pct: Math.round(pct * 10000) / 10000 };
     });
     return best;
   },
+  /* etiqueta para mostrar en el punto de venta (oferta vigente aunque dependa de la cantidad) */
+  promoBadge(p, price) {
+    if (typeof LIC === 'undefined' || !LIC.has('promos') || !p) return '';
+    const live = (DB.data.promos || []).filter(pr => pr.type !== 'coupon' && this.promoLive(pr) && this.promoApplies(pr, p));
+    const b = this.bestPromo(p, price, 1);
+    if (b) return this.promoShort(b.pr);
+    const nx = live.find(pr => pr.type === 'nxm');
+    return nx ? this.promoShort(nx) : '';
+  },
+  promoFor(p) { const b = this.bestPromo(p, p ? +p.price || 0 : 0, 1); return b ? b.pr : null; },
+  promoShort(pr) {
+    const v = +pr.value || 0;
+    return { pct: `-${v}%`, amount: `-${money(v)}`, price: `a ${money(v)}`, nxm: `${pr.buy}x${pr.pay}`, coupon: `Cupón ${pr.ctype === 'amount' ? money(v) : v + '%'}` }[pr.type || 'pct'] || '';
+  },
+  /* cupón escrito en el punto de venta */
+  couponFor(code, subtotal) {
+    const c = String(code || '').trim().toUpperCase();
+    if (!c) return { error: 'Escribe el código del cupón' };
+    const pr = (DB.data.promos || []).find(x => x.type === 'coupon' && x.code === c);
+    if (!pr) return { error: 'Ese cupón no existe' };
+    if (typeof LIC !== 'undefined' && !LIC.has('promos')) return { error: LIC.upgradeMsg('Ofertas y descuentos') };
+    if (!pr.active) return { error: 'Ese cupón está pausado' };
+    if (pr.maxUses && (pr.uses || 0) >= pr.maxUses) return { error: 'Ese cupón ya alcanzó su límite de usos' };
+    if (!this.promoLive(pr)) return { error: pr.from && today() < pr.from ? `Ese cupón empieza el ${fmtDate(pr.from)}` : pr.to && today() > pr.to ? `Ese cupón venció el ${fmtDate(pr.to)}` : 'Ese cupón no aplica hoy' };
+    if (pr.min && subtotal < pr.min) return { error: `Ese cupón aplica para compras desde ${money(pr.min)}` };
+    return { pr };
+  },
+
+  /* ---------- Garantías ---------- */
+  warrantyOf(inv, it) {
+    const p = it.productId ? this.product(it.productId) : null;
+    const days = Math.max(0, Math.round(p && p.warrantyDays !== '' && p.warrantyDays != null ? +p.warrantyDays : (+this.s.warrantyDays || 0)));
+    if (!days) return { days: 0, until: '', valid: false };
+    const until = addDays(dayKey(inv.date), days);
+    return { days, until, valid: today() <= until };
+  },
+  warrantyLines(inv) { return inv.items.map(it => ({ it, w: this.warrantyOf(inv, it) })).filter(x => x.w.days > 0); },
 
   /* ---------- Apartados (plan separe) ---------- */
   layawayStatus(l) { return l.status === 'activo' && l.dueDate < today() ? 'vencido' : l.status; },

@@ -367,7 +367,7 @@ table.tbl { width: 100%; border-collapse: collapse; }
   display: flex; flex-direction: column; transition: border-color .15s, transform .1s; text-align: left; padding: 0;
 }
 .p-card:hover { border-color: #4a4a55; transform: translateY(-1px); }
-.p-card .p-img { flex: none; height: 118px; background: linear-gradient(160deg, #1d1d23, #111115); display: grid; place-items: center; overflow: hidden; }
+.p-card .p-img { position: relative; flex: none; height: 118px; background: linear-gradient(160deg, #1d1d23, #111115); display: grid; place-items: center; overflow: hidden; }
 .p-card .p-img img { width: 100%; height: 100%; object-fit: cover; }
 .p-card .p-img .p-ini { font: 600 28px var(--display); color: #4a4c55; }
 .p-card .p-info { padding: 10px 12px 12px; flex: none; }
@@ -543,3 +543,13 @@ table.tbl { width: 100%; border-collapse: collapse; }
   .search-box { min-width: 0; flex: 1; }
   .topbar .pill.hide-sm { display: none; }
 }
+
+/* Ofertas en el punto de venta */
+.p-card .p-offer { position: absolute; top: 7px; left: 7px; z-index: 1; padding: 2px 8px; border-radius: 999px; background: #e5484d; color: #fff; font: 700 11px/1.5 var(--display, inherit); letter-spacing: .02em; box-shadow: 0 2px 8px rgba(0,0,0,.35); }
+
+/* Términos y privacidad */
+.legal-doc { max-height: 62vh; overflow: auto; padding: 4px 6px 4px 2px; line-height: 1.65; color: var(--text2, #c9ccd3); }
+.legal-doc h1 { font: 700 21px/1.25 var(--display); color: var(--text, #fff); margin: 4px 0 4px; }
+.legal-doc h2 { font: 600 15.5px/1.3 var(--display); color: var(--text, #fff); margin: 20px 0 6px; }
+.legal-doc .meta { font-size: 12.5px; opacity: .7; margin: 0 0 14px; }
+.legal-doc ul { padding-left: 20px; } .legal-doc li { margin: 3px 0; } .legal-doc b { color: var(--text, #fff); }
