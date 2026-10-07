@@ -57,7 +57,15 @@ const App = {
   current: null,
 
   async start() {
-    try { await DB.load(); await applyProvision(); await LIC.init(); }
+    let linkResult = null;
+    try {
+      await DB.load(); await applyProvision(); await LIC.init();
+      const linkCode = new URLSearchParams(location.search).get('activar');
+      if (linkCode) {
+        history.replaceState(null, '', location.pathname + location.hash);   // el código no queda en la barra de direcciones
+        try { linkResult = await LIC.activateFromLink(linkCode); } catch (e) { linkResult = { error: e.message }; }
+      }
+    }
     catch (e) { console.error(e); document.body.innerHTML = `<div style="padding:40px;color:#fff">Error al cargar los datos: ${esc(e.message)}</div>`; return; }
     const uidSaved = sessionStorage.getItem('noir-user');
     this.user = DB.data.users.find(u => u.id === uidSaved && u.active) || null;
@@ -74,6 +82,8 @@ const App = {
     const rev = () => LIC.checkRevocation().then(() => { if (!LIC.usable() && !$('#ac-code')) this.gate(); });
     setInterval(rev, 6 * 3600 * 1000);
     this.gate();
+    if (linkResult?.pl) toast(`¡Listo! Tu sistema quedó activado hasta el ${fmtDate(linkResult.pl.e)}.${linkResult.pl.u && !this.user ? ' Ahora entra con tu usuario y contraseña.' : ''}`, 'ok', 8000);
+    else if (linkResult?.error) toast(linkResult.error, 'err', 9000);
     rev();
   },
   /* Bloquea con la pantalla de activación si la suscripción no está vigente */

@@ -151,6 +151,17 @@ const LIC = {
     return pl;
   },
 
+  /* Enlace de activación: el cliente solo toca el enlace que le enviaron.
+     Cada enlace se aplica una sola vez en este navegador (abrirlo de nuevo no cambia la contraseña que el cliente ya haya cambiado). */
+  async activateFromLink(code) {
+    const d = DB.data, p = this.parse(code);
+    const used = d.meta.linkCodes || (d.meta.linkCodes = []);
+    if (p && used.includes(p.payload.id)) return { already: true };
+    const pl = await this.activate(code);
+    used.push(pl.id); DB.commit(); await DB.persist();
+    return { pl };
+  },
+
   /* Configura el negocio con los datos que trae el código (solo lo que aún no se ha personalizado) */
   applyBusiness(pl) {
     const d = DB.data, s = d.settings;
